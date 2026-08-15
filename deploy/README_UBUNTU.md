@@ -200,8 +200,9 @@ make -f deploy/Makefile up
 Jamais d'auto-update. Après revue et validation d'une nouvelle version :
 
 ```bash
-git fetch origin && git log --oneline HEAD..origin/main   # revue
-git checkout main && git pull
+git fetch origin release/ubuntu-v1
+git log --oneline HEAD..origin/release/ubuntu-v1          # revue
+git merge --ff-only origin/release/ubuntu-v1
 make -f deploy/Makefile build validate up
 ```
 
