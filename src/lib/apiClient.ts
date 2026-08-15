@@ -20,6 +20,21 @@ function resolveBaseUrl(): string {
 
 const API_BASE_URL = resolveBaseUrl();
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+
+  /** true si une fonctionnalité locale requise n'est pas disponible sur le serveur. */
+  get isServiceUnavailable(): boolean {
+    return this.status === 503;
+  }
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = `Erreur ${response.status}`;
@@ -29,7 +44,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
     } catch {
       message = await response.text().catch(() => message);
     }
-    throw new Error(message);
+    throw new ApiError(response.status, message);
   }
   return response.json() as Promise<T>;
 }
