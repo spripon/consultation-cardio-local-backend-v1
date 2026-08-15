@@ -24,18 +24,21 @@ done
 OUT="deploy/models"
 mkdir -p "$OUT"
 
-PY=${PYTHON:-python3}
-command -v "$PY" >/dev/null 2>&1 || { echo "python3 requis" >&2; exit 1; }
+# Ubuntu récent applique PEP 668 (« externally managed environment ») et refuse
+# `pip install --user`. On utilise donc un venv local dédié, idempotent, ignoré
+# par Git et par le contexte Docker.
+VENV="deploy/.venv-models"
+BOOTSTRAP=${PYTHON:-python3}
+command -v "$BOOTSTRAP" >/dev/null 2>&1 || { echo "python3 requis (paquets python3 + python3-venv)" >&2; exit 1; }
 
-# Le téléchargement a besoin du réseau : on désactive explicitement le mode
-# offline pour CETTE étape uniquement (sous-processus), jamais pour le runtime.
-export HF_HUB_OFFLINE=0
-export TRANSFORMERS_OFFLINE=0
-
-if ! "$PY" -c "import huggingface_hub" >/dev/null 2>&1; then
-  echo "→ Installation de huggingface_hub (hôte, phase installation)"
-  "$PY" -m pip install --user huggingface_hub
+if [ ! -x "$VENV/bin/python" ]; then
+  echo "→ Création du venv d'installation : $VENV"
+  "$BOOTSTRAP" -m venv "$VENV"
 fi
+PY="$VENV/bin/python"
+"$PY" -m pip install --quiet --upgrade pip
+# Modèles publics : aucun jeton Hugging Face requis.
+"$PY" -m pip install --quiet --upgrade huggingface_hub
 
 if [ -n "$(ls -A "$OUT/openmed-pii-fr" 2>/dev/null)" ]; then
   echo "= $OUT/openmed-pii-fr déjà présent : téléchargement PII ignoré."

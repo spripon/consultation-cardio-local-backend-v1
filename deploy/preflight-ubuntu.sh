@@ -61,7 +61,7 @@ if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
     ok "Docker Compose v2 : $(docker compose version | head -1)"
   else
-    fail "Docker Compose v2 absent (plugin docker-compose-plugin requis)"
+    fail "Docker Compose v2 absent : `docker compose version` doit fonctionner (paquet docker-compose-v2 sur Ubuntu, ou docker-compose-plugin depuis le dépôt Docker officiel) — voir deploy/install-host-deps.sh"
   fi
   if docker info >/dev/null 2>&1; then
     ok "Daemon Docker joignable par l'utilisateur courant"
