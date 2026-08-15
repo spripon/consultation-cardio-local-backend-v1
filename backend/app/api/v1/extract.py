@@ -1,71 +1,151 @@
-"""Extraction router: OCR -> anonymisation -> catégorisation."""
+"""Pipeline /extract : OCR local -> PII déterministe -> OpenMed -> anonymisation -> catégorisation.
 
-import io
+Aucun contenu patient n'est journalisé, aucun fichier n'est conservé.
+"""
+
+from __future__ import annotations
+
 import logging
-from typing import Any
+import time
+import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.config import settings
-from app.schemas.extraction import ExtractionResponse, ExtractedFields
-from app.services.ocr import extract_text
-from app.services.anonymize import anonymize_text
-from app.services.categorize import categorize_text
+from app.schemas.extraction import (
+    ConfidenceBlock,
+    Entity,
+    ExtractedFields,
+    ExtractionResponse,
+)
+from app.services.anonymizer import anonymize
+from app.services.categorizer import categorize
+from app.services.ocr import OcrUnavailable, run_ocr
+from app.services.openmed_pii import OpenMedUnavailable
+from app.services.preprocess import UnsupportedFormat
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/extract", tags=["extraction"])
+router = APIRouter(tags=["extraction"])
+
+ALLOWED_MIME = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/tiff",
+    "image/heic",
+    "image/heif",
+    "application/pdf",
+}
+
+MAGIC_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"%PDF", "application/pdf"),
+    (b"II*\x00", "image/tiff"),
+    (b"MM\x00*", "image/tiff"),
+)
 
 
-@router.post("", response_model=ExtractionResponse)
-async def extract_endpoint(
-    file: UploadFile = File(...),
-    engine: str = Form(settings.ocr_engine),
-) -> ExtractionResponse:
-    """Upload an image or PDF, get anonymized text and categorized form fields."""
-    if not file.content_type:
-        raise HTTPException(status_code=400, detail="Type de fichier inconnu")
+def _sniff_mime(data: bytes, declared: str) -> str:
+    """Contrôle du type réel du fichier à partir de sa signature binaire."""
+    for signature, mime in MAGIC_SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp" and b"heic" in data[8:24].lower() or data[4:12].lower().startswith(b"ftypheif"):
+        return "image/heic"
+    if declared in ALLOWED_MIME:
+        return declared
+    raise HTTPException(status_code=415, detail="Type de fichier réel non reconnu ou non autorisé.")
 
-    allowed = {"image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"}
-    if file.content_type not in allowed:
+
+@router.post("/extract", response_model=ExtractionResponse)
+async def extract_endpoint(file: UploadFile = File(...)) -> ExtractionResponse:
+    request_id = uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+
+    declared = (file.content_type or "").lower()
+    if declared and declared not in ALLOWED_MIME:
         raise HTTPException(
-            status_code=400,
-            detail=f"Type {file.content_type} non autorisé. Formats acceptés: image/*, PDF",
+            status_code=415,
+            detail="Formats acceptés : JPEG, PNG, WEBP, TIFF, HEIC ou PDF.",
         )
 
-    content = await file.read()
-    if len(content) > settings.max_upload_size:
-        raise HTTPException(status_code=413, detail="Fichier trop volumineux")
+    data = await file.read()
+    size = len(data)
+    if size == 0:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+    if size > settings.max_upload_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Fichier trop volumineux (max {settings.max_upload_size // (1024 * 1024)} Mo).",
+        )
 
-    try:
-        raw_text = extract_text(content, file.content_type, engine=engine)
-    except Exception as exc:
-        logger.error("OCR error: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Erreur OCR: {exc}") from exc
-
-    try:
-        anonymized_text, entities = anonymize_text(raw_text)
-    except Exception as exc:
-        logger.error("Anonymization error: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Erreur d'anonymisation: {exc}") from exc
-
-    try:
-        fields = categorize_text(anonymized_text)
-    except Exception as exc:
-        logger.error("Categorization error: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Erreur de catégorisation: {exc}") from exc
-
+    content_type = _sniff_mime(data, declared)
     warnings: list[str] = []
-    if not raw_text or not raw_text.strip():
-        warnings.append("Aucun texte détecté sur le document.")
-    if engine == "mock":
-        warnings.append("Moteur OCR mock activé: le vrai OCR local n'est pas configuré.")
-    if not fields.conclusion:
-        warnings.append("Section 'conclusion' non détectée.")
 
-    return ExtractionResponse(
-        fields=fields,
-        rawTextAnonymized=anonymized_text,
-        entities=entities,
-        confidence={"ocr": "mock" if engine == "mock" else "tesseract", "entities": len(entities)},
-        warnings=warnings,
-    )
+    try:
+        # 1) OCR strictement local
+        try:
+            ocr = run_ocr(data, content_type)
+        except UnsupportedFormat as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        except OcrUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"OCR local indisponible : {exc}") from exc
+
+        warnings.extend(ocr.warnings)
+        if not ocr.text.strip():
+            warnings.append("Aucun texte détecté sur le document.")
+
+        # 2) PII déterministe + OpenMed + union + anonymisation + safety sweep
+        try:
+            anon = anonymize(ocr.text)
+        except OpenMedUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Anonymisation locale indisponible (fail-closed) : {exc}",
+            ) from exc
+
+        warnings.extend(anon.warnings)
+
+        # 3) Catégorisation uniquement sur le texte anonymisé, jamais si résidu critique
+        if anon.safe_to_inject:
+            fields_dict, cat_confidence, cat_warnings = categorize(anon.text)
+            warnings.extend(cat_warnings)
+        else:
+            fields_dict = {}
+            cat_confidence = 0.0
+            warnings.append(
+                "Catégorisation automatique bloquée : corrigez et validez le texte anonymisé manuellement."
+            )
+
+        response = ExtractionResponse(
+            fields=ExtractedFields(**fields_dict) if fields_dict else ExtractedFields(),
+            rawTextAnonymized=anon.text,
+            entities=[
+                Entity(type=e.type, placeholder=e.placeholder, source=e.source, confidence=e.confidence)
+                for e in anon.entities
+            ],
+            confidence=ConfidenceBlock(
+                ocr=ocr.confidence,
+                anonymization=anon.confidence,
+                categorization=cat_confidence,
+            ),
+            warnings=warnings,
+            requiresHumanValidation=True,
+            safeToInject=anon.safe_to_inject,
+            debugRawText=ocr.text if settings.debug_raw_ocr_allowed else None,
+        )
+        return response
+    finally:
+        # Aucune persistance : on libère les octets et on journalise sans contenu.
+        del data
+        logger.info(
+            "extract request_id=%s type=%s size=%s duration_ms=%s",
+            request_id,
+            content_type,
+            size,
+            int((time.perf_counter() - started) * 1000),
+        )

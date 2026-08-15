@@ -1,23 +1,77 @@
-"""Schemas shared by the extraction endpoints."""
+"""Schémas d'échange des endpoints d'extraction / anonymisation / catégorisation."""
 
-from pydantic import BaseModel
-from typing import Any
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
 
 
 class ExtractedFields(BaseModel):
-    previousHistory: str | None = None
-    currentTreatment: str | None = None
-    interrogation: str | None = None
-    clinicalExamination: str | None = None
-    ecg: str | None = None
-    lastBiologyResults: str | None = None
-    conclusion: str | None = None
-    treatmentPlan: str | None = None
+    previousHistory: str = ""
+    currentTreatment: str = ""
+    interrogation: str = ""
+    clinicalExamination: str = ""
+    ecg: str = ""
+    lastBiologyResults: str = ""
+    conclusion: str = ""
+    treatmentPlan: str = ""
+
+
+class Entity(BaseModel):
+    type: str
+    placeholder: str
+    source: str = "deterministic"  # deterministic | openmed | safety_sweep
+    confidence: float = 0.0
+
+
+class ConfidenceBlock(BaseModel):
+    ocr: float = 0.0
+    anonymization: float = 0.0
+    categorization: float = 0.0
 
 
 class ExtractionResponse(BaseModel):
+    fields: ExtractedFields = Field(default_factory=ExtractedFields)
+    rawTextAnonymized: str = ""
+    entities: list[Entity] = Field(default_factory=list)
+    confidence: ConfidenceBlock = Field(default_factory=ConfidenceBlock)
+    warnings: list[str] = Field(default_factory=list)
+    requiresHumanValidation: bool = True
+    safeToInject: bool = True
+    #: Uniquement hors production et si ALLOW_RAW_OCR_DEBUG=true.
+    debugRawText: str | None = None
+
+
+class AnonymizeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+class AnonymizeResponse(BaseModel):
+    textAnonymized: str
+    entities: list[Entity] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    requiresHumanValidation: bool = True
+    safeToInject: bool = True
+
+
+class CategorizeRequest(BaseModel):
+    """Le texte fourni DOIT déjà être anonymisé."""
+
+    textAnonymized: str = Field(min_length=1, max_length=200_000)
+
+
+class CategorizeResponse(BaseModel):
     fields: ExtractedFields
-    rawTextAnonymized: str
-    entities: list[dict[str, Any]]
-    confidence: dict[str, Any]
-    warnings: list[str]
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+    requiresHumanValidation: bool = True
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    ocr: bool
+    openmed: bool
+    speech: bool
+    policy: str
+    environment: str

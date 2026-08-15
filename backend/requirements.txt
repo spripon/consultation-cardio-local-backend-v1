@@ -5,6 +5,15 @@ pydantic==2.10.5
 pydantic-settings==2.7.1
 Pillow==11.1.0
 pytesseract==0.3.13
-pdf2image==1.17.0
+pdfplumber==0.11.5
+pypdf==5.1.0
+opencv-python-headless==4.10.0.84
 numpy==2.2.1
-python-magic==0.4.27
+pillow-heif==0.21.0
+ocrmypdf==16.8.0
+httpx==0.28.1
+pytest==8.3.4
+# Transcription locale optionnelle (ENABLE_SPEECH=true)
+# faster-whisper==1.1.1
+# Détection PII par modèle local OpenMed 2.0 (installer hors ligne)
+# openmed==2.0.0

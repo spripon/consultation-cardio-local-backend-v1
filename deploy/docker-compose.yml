@@ -1,0 +1,54 @@
+# Pile auto-hébergée Ubuntu : Caddy (seul exposé) + API locale + frontend statique.
+# Aucun service cloud, aucune base de données externe.
+services:
+  api:
+    build:
+      context: ../backend
+    container_name: cardio-api
+    restart: unless-stopped
+    env_file:
+      - ../backend/.env
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      # Modèles PII / Whisper téléchargés au préalable sur la machine hôte.
+      - ./models:/models:ro
+    tmpfs:
+      - /tmp/consultation-cardio:size=512m,mode=1700
+    # Pas de ports publiés : uniquement joignable par Caddy sur le réseau interne.
+    expose:
+      - "8000"
+    networks:
+      - cardio
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+  web:
+    image: caddy:2.8-alpine
+    container_name: cardio-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../dist:/srv/www:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - cardio
+
+networks:
+  cardio:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

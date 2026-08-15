@@ -1,4 +1,8 @@
-"""Application configuration via environment variables."""
+"""Configuration de l'application (variables d'environnement uniquement).
+
+Aucune valeur par défaut ne doit permettre l'envoi de données vers un service
+externe : le runtime est volontairement « fail-closed ».
+"""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,34 +14,65 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # API
+    # --- Application ---
+    app_env: str = "development"  # development | production
     api_v1_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
-    max_upload_size: int = 20_971_520  # 20 MB
 
-    # OCR
+    # --- Limites d'upload ---
+    max_upload_size: int = 20_971_520  # 20 Mo
+    max_pdf_pages: int = 20
+    ocr_timeout_seconds: int = 120
+    temp_dir: str = "/tmp/consultation-cardio"
+
+    # --- OCR local ---
     tesseract_cmd: str | None = None
-    tesseract_lang: str = "fra"
-    ocr_engine: str = "tesseract"  # tesseract | mock
+    tesseract_lang: str = "fra+eng"
+    ocr_dpi: int = 300
+    enable_heic: bool = True
 
-    # Categorisation / anonymisation
-    anonymizer_engine: str = "rules"  # rules | mock
-    categorizer_engine: str = "rules"  # rules | mock
+    # --- Anonymisation ---
+    # strict_no_leak : supprime aussi âge / sexe / dates cliniques
+    # gdpr_pseudonymization : conserve âge / sexe / dates cliniques (défaut cardio)
+    openmed_policy: str = "gdpr_pseudonymization"
+    openmed_pii_model: str = "/models/openmed-pii"
+    require_openmed: bool = False
+    redact_doctor_names: bool = True
+    hf_hub_offline: bool = True
 
-    # Transcription
-    whisper_model: str = "base"
+    # --- Transcription locale ---
+    enable_speech: bool = False
+    whisper_model_path: str = "/models/faster-whisper-small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
-    transcription_engine: str = "whisper"  # whisper | mock
+    whisper_language: str = "fr"
 
-    # Persistence (disabled by default)
-    enable_persistence: bool = False
-    database_url: str | None = None
-    encryption_key: str | None = None
+    # --- Débogage ---
+    # Interdit en production (voir `debug_raw_ocr_allowed`).
+    allow_raw_ocr_debug: bool = False
+
+    # --- Réservé V2 : jamais appelé en V1 ---
+    local_llm_url: str | None = None
+    enable_local_llm: bool = False
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() in {"production", "prod"}
+
+    @property
+    def debug_raw_ocr_allowed(self) -> bool:
+        return self.allow_raw_ocr_debug and not self.is_production
+
+    @property
+    def strict_policy(self) -> bool:
+        return self.openmed_policy == "strict_no_leak"
 
     @property
     def allowed_cors_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if self.is_production:
+            origins = [o for o in origins if o != "*"]
+        return origins
 
 
 settings = Settings()

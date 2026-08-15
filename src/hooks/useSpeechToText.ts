@@ -13,8 +13,7 @@ export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
   const audioChunksRef = useRef<Blob[]>([]);
 
   const transcribeLocally = useCallback(async (audioBlob: Blob) => {
-    console.log("🎤 Début transcription locale, taille audio:", audioBlob.size, "bytes");
-
+    // Aucun contenu patient n'est journalisé : uniquement des métadonnées techniques.
     try {
       const formData = new FormData();
       const extension = audioBlob.type.includes("wav")
@@ -23,26 +22,20 @@ export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
           ? "audio.mp4"
           : "audio.webm";
       formData.append("audio", audioBlob, extension);
-      formData.append("engine", "whisper");
-
-      console.log("📡 Envoi requête vers le serveur local...");
 
       const data = await postFormData<{ text: string }>("/v1/transcribe", formData);
 
-      console.log("📡 Réponse reçue:", data);
-
-      if (data.text) {
-        console.log("📝 Transcription:", data.text);
+      if (data.text?.trim()) {
         onTranscript(data.text.trim());
         toast.success("Transcription réussie!");
       } else {
-        console.warn("⚠️ Pas de texte dans la réponse");
         toast.warning("Aucun texte détecté dans l'audio");
       }
     } catch (error) {
-      console.error("❌ Erreur transcription locale:", error);
-      const errorMessage = error instanceof Error ? error.message : "Erreur inconnue";
-      toast.error(`Erreur de transcription: ${errorMessage}`);
+      const errorMessage =
+        error instanceof Error ? error.message : "Service de dictée locale indisponible";
+      // Fail-closed : aucun repli vers un service de transcription externe.
+      toast.error(`Transcription locale impossible : ${errorMessage}`);
     }
   }, [onTranscript]);
 
@@ -88,12 +81,10 @@ export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
         console.log('🛑 Arrêt de l\'enregistrement, chunks:', audioChunksRef.current.length);
         
         // Créer le blob audio final avec le bon type MIME
-        const audioBlob = new Blob(audioChunksRef.current, { 
+      const audioBlob = new Blob(audioChunksRef.current, { 
           type: mimeType 
         });
-        
-        console.log('📁 Blob audio créé:', audioBlob.size, 'bytes, type:', audioBlob.type);
-        
+
         // Arrêter le stream
         stream.getTracks().forEach(track => track.stop());
         
