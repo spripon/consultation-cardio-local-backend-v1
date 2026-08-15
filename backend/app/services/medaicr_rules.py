@@ -53,6 +53,10 @@ HIGH_RISK_TYPES = {
 _NAME_LIKE_TYPES = {"NAME", "FIRSTNAME", "DOCTOR"}
 
 _NAME_CHARS = r"A-Za-zÀ-ÖØ-öø-ÿ'’\-"
+#: Séparateur intra-valeur : espaces horizontaux uniquement. Un motif ne doit
+#: JAMAIS traverser un retour à la ligne, sinon la valeur capturée engloutit
+#: l'étiquette suivante et masque des champs entiers du compte rendu.
+_INLINE_SPACE = r"[ \t]+"
 
 # --- Regex directes (valeur capturée dans le groupe 1 quand nécessaire) ---
 DIRECT_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
@@ -75,14 +79,17 @@ DIRECT_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
         "ADDRESS",
         re.compile(
             r"\b\d{1,4}\s?(?:bis|ter)?\s*(?:rue|avenue|av\.|boulevard|bd|impasse|allée|allee|chemin|place|route|quai|lotissement|résidence|residence)"
-            rf"[\s{_NAME_CHARS}0-9,.']{{2,60}}",
+            rf"[ \t{_NAME_CHARS}0-9,.']{{2,60}}",
             re.IGNORECASE,
         ),
         0.85,
     ),
     (
         "ADDRESS",
-        re.compile(r"\b\d{5}\s+[A-ZÀ-Ö][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30}(?:[\s\-][A-ZÀ-Öa-z][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30})?"),
+        re.compile(
+            r"\b\d{5}[ \t]+[A-ZÀ-Ö][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30}"
+            r"(?:[ \t\-][A-ZÀ-Öa-z][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30})?"
+        ),
         0.7,
     ),
 ]
@@ -115,14 +122,15 @@ LABEL_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
         "NAME",
         re.compile(
-            rf"(?:nom\s+de\s+famille|nom\s+patient|nom|patient|patiente)\s*[:\-]\s*([{_NAME_CHARS}]{{2,30}}(?:\s+[{_NAME_CHARS}]{{2,30}})?)",
+            rf"(?:nom{_INLINE_SPACE}de{_INLINE_SPACE}famille|nom{_INLINE_SPACE}patient|nom|patient|patiente)"
+            rf"[ \t]*[:\-][ \t]*([{_NAME_CHARS}]{{2,30}}(?:{_INLINE_SPACE}[{_NAME_CHARS}]{{2,30}})?)",
             re.IGNORECASE,
         ),
         0.9,
     ),
     (
         "FIRSTNAME",
-        re.compile(rf"(?:pr[ée]nom)\s*[:\-]\s*([{_NAME_CHARS}]{{2,30}})", re.IGNORECASE),
+        re.compile(rf"(?:pr[ée]nom)[ \t]*[:\-][ \t]*([{_NAME_CHARS}]{{2,30}})", re.IGNORECASE),
         0.9,
     ),
     (
@@ -138,7 +146,8 @@ LABEL_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
         "DOCTOR",
         re.compile(
-            rf"\b(?:Dr|Dr\.|Docteur|Pr|Pr\.|Professeur)\s+((?:[{_NAME_CHARS}]{{2,30}})(?:\s+[{_NAME_CHARS}]{{2,30}})?)"
+            rf"\b(?:Dr|Dr\.|Docteur|Pr|Pr\.|Professeur)[ \t]+"
+            rf"((?:[{_NAME_CHARS}]{{2,30}})(?:{_INLINE_SPACE}[{_NAME_CHARS}]{{2,30}})?)"
         ),
         0.85,
     ),
