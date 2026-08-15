@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tesseract-ocr-eng \
         ocrmypdf \
         poppler-utils \
+        ffmpeg \
         ghostscript \
         unpaper \
         libgl1 \
