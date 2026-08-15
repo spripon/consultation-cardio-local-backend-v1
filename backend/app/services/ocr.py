@@ -59,9 +59,42 @@ def _pytesseract():
     return pytesseract
 
 
+def required_languages() -> list[str]:
+    return [part for part in settings.tesseract_lang.split("+") if part]
+
+
+def _installed_languages(pytesseract) -> set[str]:
+    """Langues réellement installées localement (aucun OCR de document)."""
+    try:
+        return {str(lang) for lang in pytesseract.get_languages(config="")}
+    except Exception:
+        cmd = settings.tesseract_cmd or pytesseract.pytesseract.tesseract_cmd
+        try:
+            process = subprocess.run(
+                [cmd, "--list-langs"], capture_output=True, text=True, timeout=15, check=False
+            )
+        except Exception as exc:  # pragma: no cover - dépend de l'hôte
+            raise OcrUnavailable("Impossible de lister les langues Tesseract locales.") from exc
+        lines = (process.stdout or "").splitlines()
+        return {line.strip() for line in lines[1:] if line.strip()}
+
+
+def ensure_tesseract_languages() -> None:
+    """Vérifie binaire ET packs de langue configurés (fra+eng par défaut)."""
+    pytesseract = _pytesseract()
+    installed = _installed_languages(pytesseract)
+    missing = [lang for lang in required_languages() if lang not in installed]
+    if missing:
+        raise OcrUnavailable(
+            "Packs de langue Tesseract manquants : "
+            + ", ".join(missing)
+            + ". Installez tesseract-ocr-fra et tesseract-ocr-eng."
+        )
+
+
 def tesseract_available() -> bool:
     try:
-        _pytesseract()
+        ensure_tesseract_languages()
         return True
     except OcrUnavailable:
         return False
