@@ -86,7 +86,7 @@ def test_debug_raw_text_never_returned_in_production(client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body.get("debugRawText") is None
-    assert "Kervella" not in body["textAnonymized"]
+    assert "Kervella" not in body["rawTextAnonymized"]
 
 
 def test_readyz_reports_missing_speech_when_enabled(client, monkeypatch):
