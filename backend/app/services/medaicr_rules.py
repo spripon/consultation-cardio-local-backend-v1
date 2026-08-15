@@ -1,4 +1,9 @@
-"""Couche déterministe d'identification des données personnelles (inspirée MedAiCR).
+"""Règles déterministes inspirées de MedAiCR (« MedAiCR-derived deterministic rules »).
+
+Ce module N'EST PAS le paquet MedAiCR complet (qui comporte notamment la
+rédaction PDF par zones, un watcher de dossiers et un LLM optionnel) : il en
+reprend uniquement la couche déterministe de détection d'identifiants, adaptée
+à la cardiologie. Aucun LLM MedAiCR externe n'est activé dans cette variante.
 
 Principes reproduits :
   * extraction par étiquettes (« Nom : », « IPP : », « Né le ») ;
@@ -30,10 +35,28 @@ TOKENS: dict[str, str] = {
     "ID": "[ID]",
 }
 
-#: Types dont un résidu constitue une fuite à haut risque.
-HIGH_RISK_TYPES = {"NIR", "EMAIL", "PHONE", "DOB", "IPP", "ID"}
+#: Types dont un résidu constitue une fuite à haut risque (identifiants directs).
+HIGH_RISK_TYPES = {
+    "NIR",
+    "EMAIL",
+    "PHONE",
+    "DOB",
+    "IPP",
+    "ID",
+    "NAME",
+    "FIRSTNAME",
+    "ADDRESS",
+    "DOCTOR",
+}
+
+#: Types soumis au filtre de plausibilité onomastique lors du balayage final.
+_NAME_LIKE_TYPES = {"NAME", "FIRSTNAME", "DOCTOR"}
 
 _NAME_CHARS = r"A-Za-zÀ-ÖØ-öø-ÿ'’\-"
+#: Séparateur intra-valeur : espaces horizontaux uniquement. Un motif ne doit
+#: JAMAIS traverser un retour à la ligne, sinon la valeur capturée engloutit
+#: l'étiquette suivante et masque des champs entiers du compte rendu.
+_INLINE_SPACE = r"[ \t]+"
 
 # --- Regex directes (valeur capturée dans le groupe 1 quand nécessaire) ---
 DIRECT_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
@@ -56,14 +79,17 @@ DIRECT_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
         "ADDRESS",
         re.compile(
             r"\b\d{1,4}\s?(?:bis|ter)?\s*(?:rue|avenue|av\.|boulevard|bd|impasse|allée|allee|chemin|place|route|quai|lotissement|résidence|residence)"
-            rf"[\s{_NAME_CHARS}0-9,.']{{2,60}}",
+            rf"[ \t{_NAME_CHARS}0-9,.']{{2,60}}",
             re.IGNORECASE,
         ),
         0.85,
     ),
     (
         "ADDRESS",
-        re.compile(r"\b\d{5}\s+[A-ZÀ-Ö][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30}(?:[\s\-][A-ZÀ-Öa-z][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30})?"),
+        re.compile(
+            r"\b\d{5}[ \t]+[A-ZÀ-Ö][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30}"
+            r"(?:[ \t\-][A-ZÀ-Öa-z][A-Za-zÀ-ÖØ-öø-ÿ'’\-]{1,30})?"
+        ),
         0.7,
     ),
 ]
@@ -96,14 +122,15 @@ LABEL_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
         "NAME",
         re.compile(
-            rf"(?:nom\s+de\s+famille|nom\s+patient|nom|patient|patiente)\s*[:\-]\s*([{_NAME_CHARS}]{{2,30}}(?:\s+[{_NAME_CHARS}]{{2,30}})?)",
+            rf"(?:nom{_INLINE_SPACE}de{_INLINE_SPACE}famille|nom{_INLINE_SPACE}patient|nom|patient|patiente)"
+            rf"[ \t]*[:\-][ \t]*([{_NAME_CHARS}]{{2,30}}(?:{_INLINE_SPACE}[{_NAME_CHARS}]{{2,30}})?)",
             re.IGNORECASE,
         ),
         0.9,
     ),
     (
         "FIRSTNAME",
-        re.compile(rf"(?:pr[ée]nom)\s*[:\-]\s*([{_NAME_CHARS}]{{2,30}})", re.IGNORECASE),
+        re.compile(rf"(?:pr[ée]nom)[ \t]*[:\-][ \t]*([{_NAME_CHARS}]{{2,30}})", re.IGNORECASE),
         0.9,
     ),
     (
@@ -119,7 +146,8 @@ LABEL_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
         "DOCTOR",
         re.compile(
-            rf"\b(?:Dr|Dr\.|Docteur|Pr|Pr\.|Professeur)\s+((?:[{_NAME_CHARS}]{{2,30}})(?:\s+[{_NAME_CHARS}]{{2,30}})?)"
+            rf"\b(?:Dr|Dr\.|Docteur|Pr|Pr\.|Professeur)[ \t]+"
+            rf"((?:[{_NAME_CHARS}]{{2,30}})(?:{_INLINE_SPACE}[{_NAME_CHARS}]{{2,30}})?)"
         ),
         0.85,
     ),
@@ -269,7 +297,17 @@ def safety_sweep(text: str) -> list[Finding]:
         if pii_type not in HIGH_RISK_TYPES:
             continue
         for match in pattern.finditer(text):
-            value = _clean_value(match.group(0))
+            raw = match.group(0)
+            # Un fragment contenant déjà un jeton d'anonymisation n'est pas un
+            # résidu : c'est du texte déjà masqué (ex. « [ADRESSE] »). Le test
+            # porte sur la chaîne BRUTE, avant nettoyage des crochets.
+            if "[" in raw or "]" in raw:
+                continue
+            value = _clean_value(raw)
+            if not value:
+                continue
+            if pii_type in _NAME_LIKE_TYPES and not _is_plausible_name(value):
+                continue
             key = (pii_type, value.lower())
             if key in seen:
                 continue
@@ -279,8 +317,14 @@ def safety_sweep(text: str) -> list[Finding]:
         if pii_type not in HIGH_RISK_TYPES:
             continue
         for match in pattern.finditer(text):
-            value = _clean_value(match.group(1))
-            if not value or value.startswith("["):
+            raw = match.group(1)
+            # Valeur déjà masquée (« Adresse : [ADRESSE] ») : ce n'est pas un résidu.
+            if "[" in raw or "]" in raw:
+                continue
+            value = _clean_value(raw)
+            if not value:
+                continue
+            if pii_type in _NAME_LIKE_TYPES and not _is_plausible_name(value):
                 continue
             key = (pii_type, value.lower())
             if key in seen:

@@ -20,7 +20,7 @@ from app.schemas.extraction import (
 )
 from app.services.anonymizer import anonymize
 from app.services.categorizer import categorize
-from app.services.ocr import OcrUnavailable, run_ocr
+from app.services.ocr import OcrUnavailable, PdfTooLong, run_ocr
 from app.services.openmed_pii import OpenMedUnavailable
 from app.services.preprocess import UnsupportedFormat
 
@@ -94,6 +94,8 @@ async def extract_endpoint(file: UploadFile = File(...)) -> ExtractionResponse:
             ocr = run_ocr(data, content_type)
         except UnsupportedFormat as exc:
             raise HTTPException(status_code=415, detail=str(exc)) from exc
+        except PdfTooLong as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except OcrUnavailable as exc:
             raise HTTPException(status_code=503, detail=f"OCR local indisponible : {exc}") from exc
 

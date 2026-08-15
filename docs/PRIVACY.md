@@ -39,3 +39,20 @@ noms de médecins (configurable).
 Conservé (politique `gdpr_pseudonymization`, adaptée à la cardiologie) : âge, sexe,
 valeurs biologiques, constantes, tracés ECG, traitements et posologies, antécédents.
 La politique `strict_no_leak` retire en plus l'âge, le sexe et les dates.
+## Précisions d'audit
+
+- **Aucune garantie d'anonymisation.** Le pipeline (règles déterministes +
+  modèle PII local + balayage de sécurité) réduit le risque ; il ne l'annule pas.
+  La relecture par un professionnel de santé reste obligatoire, et le champ
+  `requiresHumanValidation` vaut toujours `true`.
+- **Défaut restrictif.** `safeToInject` vaut `false` par défaut, côté serveur
+  comme côté navigateur : une réponse tronquée ou inattendue n'autorise jamais
+  l'insertion automatique dans le formulaire.
+- **Revalidation des corrections.** Le texte relu et corrigé par le médecin est
+  repassé sur le serveur (anonymisation + balayage) avant catégorisation. Les
+  rubriques insérées sont recalculées à partir du texte réellement validé, pas à
+  partir de la première extraction.
+- **Isolation réseau.** Le conteneur d'API n'a aucune route de sortie
+  (`internal: true`) : aucun appel externe n'est possible, même par erreur.
+- **Documents refusés plutôt que tronqués.** Un PDF dépassant la limite de pages
+  est rejeté (413) pour éviter tout compte rendu partiel non signalé.

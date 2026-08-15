@@ -13,7 +13,9 @@ pillow-heif==0.21.0
 ocrmypdf==16.8.0
 httpx==0.28.1
 pytest==8.3.4
+# Détection PII par modèle local OpenMed 2.0 (CPU only, exécution hors ligne).
+# Le runtime HF est inclus via l'extra [hf] ; les poids sont téléchargés au
+# préalable sur l'hôte (scripts/download_openmed_model.py) puis montés en /models.
+openmed[hf]==2.0.0
 # Transcription locale optionnelle (ENABLE_SPEECH=true)
 # faster-whisper==1.1.1
-# Détection PII par modèle local OpenMed 2.0 (installer hors ligne)
-# openmed==2.0.0

@@ -14,7 +14,9 @@ import argparse
 import sys
 from pathlib import Path
 
-DEFAULT_PII_REPO = "OpenMed/OpenMed-NER-PathologyDetect-PubMed-v2-109M"
+# Modèle PII français dédié d'OpenMed 2.0 (ne PAS utiliser un modèle
+# PathologyDetect, qui n'est pas un modèle de dé-identification).
+DEFAULT_PII_REPO = "OpenMed/OpenMed-PII-French-SuperClinical-Small-44M-v1"
 DEFAULT_WHISPER_REPO = "Systran/faster-whisper-small"
 
 
@@ -42,13 +44,14 @@ def main() -> None:
     out = Path(args.out).resolve()
 
     if not args.skip_pii:
-        download(args.pii_repo, out / "openmed-pii")
+        download(args.pii_repo, out / "openmed-pii-fr")
     if not args.skip_whisper:
         download(args.whisper_repo, out / "faster-whisper-small")
 
     print(
         "\nDéfinissez ensuite dans backend/.env :\n"
-        "  OPENMED_PII_MODEL=/models/openmed-pii\n"
+        "  OPENMED_PII_MODEL=/models/openmed-pii-fr\n"
+        "  OPENMED_LANGUAGE=fr\n"
         "  WHISPER_MODEL_PATH=/models/faster-whisper-small"
     )
 

@@ -1,6 +1,6 @@
-"""Endpoint de santé. Ne révèle ni chemin, ni secret."""
+"""Endpoints de santé / readiness. Ne révèlent ni chemin, ni secret."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from app.config import settings
 from app.schemas.extraction import HealthResponse
@@ -13,14 +13,40 @@ router = APIRouter(tags=["health"])
 VERSION = "1.0.0-local"
 
 
-@router.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
+def _snapshot() -> HealthResponse:
+    ocr_ok = tesseract_available()
+    openmed_ok = openmed_status().available
+
+    missing: list[str] = []
+    if settings.ocr_required and not ocr_ok:
+        missing.append("ocr")
+    if settings.openmed_required and not openmed_ok:
+        missing.append("openmed")
+
+    ready = not missing
     return HealthResponse(
-        status="ok",
+        status="ok" if ready else "degraded",
         version=VERSION,
-        ocr=tesseract_available(),
-        openmed=openmed_status().available,
+        ocr=ocr_ok,
+        openmed=openmed_ok,
         speech=speech_available(),
         policy=settings.openmed_policy,
         environment="production" if settings.is_production else "development",
+        ready=ready,
+        missing=missing,
     )
+
+
+@router.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    """Diagnostic : répond toujours 200, mais `status` reflète l'état réel."""
+    return _snapshot()
+
+
+@router.get("/readyz", response_model=HealthResponse)
+def readyz(response: Response) -> HealthResponse:
+    """Readiness : 503 tant qu'un composant local obligatoire est absent."""
+    snapshot = _snapshot()
+    if not snapshot.ready:
+        response.status_code = 503
+    return snapshot
