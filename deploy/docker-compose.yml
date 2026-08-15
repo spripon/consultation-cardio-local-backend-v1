@@ -1,5 +1,7 @@
-# Pile auto-hébergée Ubuntu : Caddy (seul exposé) + API locale + frontend statique.
-# Aucun service cloud, aucune base de données externe.
+# Pile auto-hebergee Ubuntu : frontend/Caddy local + API locale.
+# Exposition Internet attendue via Cloudflare Tunnel deja present sur l'hote :
+# consultation.cardiologie-tarbes.org -> http://127.0.0.1:8091
+# Aucun port FastAPI n'est publie sur l'hote.
 services:
   api:
     build:
@@ -12,20 +14,13 @@ services:
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
     volumes:
-      # Modèles PII / Whisper téléchargés au préalable sur la machine hôte.
       - ./models:/models:ro
     tmpfs:
       - /tmp/consultation-cardio:size=512m,mode=1700
-      # Système de fichiers racine en lecture seule : /tmp doit rester inscriptible
-      # (fichiers temporaires OCR, effacés à l'arrêt du conteneur).
       - /tmp:size=1g,mode=1777
-    # Aucun port publié : uniquement joignable par Caddy sur le réseau interne.
     expose:
       - "8000"
     networks:
-      # UNIQUEMENT le réseau `internal: true` : Docker ne crée aucune route de
-      # sortie (pas de gateway NAT), donc l'API n'a aucun accès Internet au
-      # runtime, même si un paquet tentait un appel externe.
       - backend_internal
     security_opt:
       - no-new-privileges:true
@@ -38,9 +33,10 @@ services:
           memory: 4g
 
   web:
-    # Image construite depuis la racine du dépôt : le frontend est compilé dans
-    # l'étape builder (node:22-alpine), donc AUCUN Node/npm n'est requis sur
-    # l'hôte Ubuntu et aucun dist/ hôte n'est nécessaire.
+    # Le frontend est compile dans l'image. Caddy ecoute :80 DANS le conteneur,
+    # mais l'hote ne l'expose que sur la boucle locale IPv4 127.0.0.1:8091.
+    # cloudflared, execute sur le meme serveur Ubuntu, doit utiliser
+    # http://127.0.0.1:8091 comme Service URL.
     build:
       context: ..
       dockerfile: deploy/Dockerfile.web
@@ -49,20 +45,16 @@ services:
     depends_on:
       - api
     ports:
-      - "80:80"
-      - "443:443"
-    # OBLIGATOIRE : identifiants Basic Auth. Si deploy/caddy.env est absent,
-    # `docker compose up` échoue au lieu de publier un site sans authentification.
+      - "127.0.0.1:8091:80"
     env_file:
       - ./caddy.env
     volumes:
-      # Caddyfile et frontend statique sont dans l'image (deploy/Dockerfile.web).
       - caddy_data:/data
       - caddy_config:/config
     networks:
-      # `backend_internal` pour joindre l'API, `edge` pour ACME/HTTPS public.
+      # Web et API partagent uniquement le reseau interne Docker. Le web n'a
+      # pas besoin d'egress Internet : le tunnel Cloudflare tourne sur l'hote.
       - backend_internal
-      - edge
     security_opt:
       - no-new-privileges:true
 
@@ -70,8 +62,6 @@ networks:
   backend_internal:
     driver: bridge
     internal: true
-  edge:
-    driver: bridge
 
 volumes:
   caddy_data:
