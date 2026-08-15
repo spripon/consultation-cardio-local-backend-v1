@@ -175,3 +175,50 @@ aucune donnée. Un rollback se limite au code et à l'image du conteneur.
 - Si un composant local requis manque, l'API renvoie une erreur 503 explicite.
   Aucun service externe de secours n'est appelé.
 - Sauvegardez uniquement `backend/.env`, `deploy/Caddyfile` et `deploy/models/`.
+## Mise à jour d'audit (durcissement)
+
+### Modèle PII français
+```bash
+python scripts/download_openmed_model.py --out deploy/models
+# -> deploy/models/openmed-pii-fr  (OpenMed/OpenMed-PII-French-SuperClinical-Small-44M-v1)
+```
+Dans `backend/.env` :
+```
+OPENMED_PII_MODEL=/models/openmed-pii-fr
+OPENMED_LANGUAGE=fr
+REQUIRE_OPENMED=true        # obligatoire en production
+```
+Avec `APP_ENV=production`, OpenMed est requis **même si la variable est absente** :
+`/extract` et `/anonymize` renvoient 503 tant que le modèle local n'est pas monté.
+Aucun téléchargement n'a lieu pendant une requête (`HF_HUB_OFFLINE=1`,
+`TRANSFORMERS_OFFLINE=1`, `OPENMED_OFFLINE=1`).
+
+### Readiness
+```bash
+curl -fsS http://127.0.0.1:8000/api/v1/readyz   # 503 si OCR ou modèle PII manquant
+```
+`/readyz` sert aussi de HEALTHCHECK Docker : un conteneur non prêt est marqué
+`unhealthy` au lieu d'accepter des documents.
+
+### Isolation réseau
+Le service `api` n'est attaché qu'au réseau `backend_internal` (`internal: true`) :
+Docker ne lui crée **aucune route de sortie**. Seul Caddy est sur le réseau `edge`
+(ACME/HTTPS). Vérification :
+```bash
+docker compose exec api python -c "import socket;socket.create_connection(('1.1.1.1',443),3)"
+# doit échouer (Network is unreachable)
+```
+
+### Contrôle d'accès (obligatoire si exposé sur Internet)
+```bash
+docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<mot-de-passe>'
+cp deploy/caddy-auth/basic-auth.conf.example deploy/caddy-auth/basic-auth.conf
+export BASIC_AUTH_USER=cardiologue BASIC_AUTH_HASH='$2a$14$...'
+docker compose up -d web
+```
+Les fichiers `deploy/caddy-auth/*.conf` sont ignorés par Git. Sans fichier, Caddy
+démarre sans authentification : réservé à un déploiement LAN ou Tailscale.
+
+### Limites de documents
+Un PDF de plus de `MAX_PDF_PAGES` pages est **refusé** (HTTP 413) : jamais de
+compte rendu tronqué en silence.
