@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { postFormData } from "@/lib/apiClient";
+import { ApiError, postFormData } from "@/lib/apiClient";
 
 interface SpeechToTextOptions {
   onTranscript: (text: string) => void;
@@ -9,6 +9,7 @@ interface SpeechToTextOptions {
 export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isUnavailable, setIsUnavailable] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -32,6 +33,15 @@ export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
         toast.warning("Aucun texte détecté dans l'audio");
       }
     } catch (error) {
+      if (error instanceof ApiError && error.isServiceUnavailable) {
+        // Fonctionnalité locale non activée sur ce serveur : on la désactive
+        // dans l'interface plutôt que d'appeler un service externe.
+        setIsUnavailable(true);
+        toast.error(
+          "Dictée locale non disponible sur ce serveur. Saisissez le texte manuellement.",
+        );
+        return;
+      }
       const errorMessage =
         error instanceof Error ? error.message : "Service de dictée locale indisponible";
       // Fail-closed : aucun repli vers un service de transcription externe.
@@ -128,6 +138,7 @@ export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
   return {
     isListening,
     isProcessing,
+    isUnavailable,
     startListening,
     stopListening,
   };
