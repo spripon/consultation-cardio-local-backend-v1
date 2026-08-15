@@ -16,12 +16,30 @@ export type ExtractedFields = Partial<
   >
 >;
 
+export interface ExtractionEntity {
+  type: string;
+  placeholder: string;
+  source: string;
+  confidence: number;
+}
+
+export interface ExtractionConfidence {
+  ocr: number;
+  anonymization: number;
+  categorization: number;
+}
+
 export interface ExtractionResult {
   fields: ExtractedFields;
   rawTextAnonymized: string;
-  entities: Array<Record<string, unknown>>;
-  confidence: Record<string, unknown>;
+  entities: ExtractionEntity[];
+  confidence: ExtractionConfidence;
   warnings: string[];
+  /** Toujours true : la relecture par un soignant est obligatoire. */
+  requiresHumanValidation: boolean;
+  /** false si un identifiant résiduel a été détecté : injection interdite. */
+  safeToInject: boolean;
+  debugRawText?: string | null;
 }
 
 export const useLocalExtraction = () => {
@@ -35,10 +53,15 @@ export const useLocalExtraction = () => {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("engine", "tesseract");
 
       const result = await postFormData<ExtractionResult>("/v1/extract", formData);
-      return result;
+      return {
+        ...result,
+        entities: result.entities ?? [],
+        warnings: result.warnings ?? [],
+        requiresHumanValidation: true,
+        safeToInject: result.safeToInject !== false,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur lors de l'extraction";
       setError(message);
