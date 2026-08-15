@@ -7,10 +7,9 @@ import { CardiologyFormData } from "./types";
 interface ClinicalSectionsProps {
   formData: CardiologyFormData;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  apiKey?: string;
 }
 
-const ClinicalSections = ({ formData, onChange, apiKey }: ClinicalSectionsProps) => {
+const ClinicalSections = ({ formData, onChange }: ClinicalSectionsProps) => {
   return (
     <div className="space-y-6">
       <ConsultationReasonSection 
@@ -21,13 +20,11 @@ const ClinicalSections = ({ formData, onChange, apiKey }: ClinicalSectionsProps)
       <ClinicalHistorySection 
         formData={formData}
         onChange={onChange}
-        apiKey={apiKey}
       />
       
       <ExaminationSection 
         formData={formData}
         onChange={onChange}
-        apiKey={apiKey}
       />
     </div>
   );

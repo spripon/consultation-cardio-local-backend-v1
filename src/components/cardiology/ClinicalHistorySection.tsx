@@ -7,10 +7,9 @@ import { CardiologyFormData } from "./types";
 interface ClinicalHistorySectionProps {
   formData: CardiologyFormData;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  apiKey?: string;
 }
 
-const ClinicalHistorySection = ({ formData, onChange, apiKey }: ClinicalHistorySectionProps) => {
+const ClinicalHistorySection = ({ formData, onChange }: ClinicalHistorySectionProps) => {
   const handleDictation = (fieldName: string) => (text: string) => {
     const event = {
       target: {
@@ -27,7 +26,6 @@ const ClinicalHistorySection = ({ formData, onChange, apiKey }: ClinicalHistoryS
           <Label htmlFor="previousHistory">Antécédents et comorbidités principales</Label>
           <DictationButton 
             onTranscript={handleDictation('previousHistory')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea
@@ -45,7 +43,6 @@ const ClinicalHistorySection = ({ formData, onChange, apiKey }: ClinicalHistoryS
           <Label htmlFor="currentTreatment">Traitement habituel</Label>
           <DictationButton 
             onTranscript={handleDictation('currentTreatment')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea

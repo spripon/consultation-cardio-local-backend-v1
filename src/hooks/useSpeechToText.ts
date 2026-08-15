@@ -1,70 +1,50 @@
-import { useState, useRef, useCallback } from 'react';
-import { toast } from 'sonner';
+import { useState, useRef, useCallback } from "react";
+import { toast } from "sonner";
+import { postFormData } from "@/lib/apiClient";
 
 interface SpeechToTextOptions {
   onTranscript: (text: string) => void;
-  apiKey?: string;
 }
 
-export const useSpeechToText = ({ onTranscript, apiKey }: SpeechToTextOptions) => {
+export const useSpeechToText = ({ onTranscript }: SpeechToTextOptions) => {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  const transcribeWithWhisper = useCallback(async (audioBlob: Blob) => {
-    console.log('🎤 Début transcription avec Whisper, taille audio:', audioBlob.size, 'bytes');
-    
-    if (!apiKey) {
-      console.error('❌ Clé API OpenAI manquante');
-      toast.error("Clé API OpenAI manquante");
-      return;
-    }
+  const transcribeLocally = useCallback(async (audioBlob: Blob) => {
+    console.log("🎤 Début transcription locale, taille audio:", audioBlob.size, "bytes");
 
     try {
       const formData = new FormData();
-      // Utiliser l'extension appropriée selon le type MIME
-      const extension = audioBlob.type.includes('wav') ? 'audio.wav' : 
-                       audioBlob.type.includes('mp4') ? 'audio.mp4' : 'audio.webm';
-      formData.append('file', audioBlob, extension);
-      formData.append('model', 'whisper-1');
-      formData.append('language', 'fr');
-      
-      console.log('📡 Envoi requête à Whisper API...');
-      
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: formData
-      });
+      const extension = audioBlob.type.includes("wav")
+        ? "audio.wav"
+        : audioBlob.type.includes("mp4")
+          ? "audio.mp4"
+          : "audio.webm";
+      formData.append("audio", audioBlob, extension);
+      formData.append("engine", "whisper");
 
-      console.log('📡 Réponse API reçue, status:', response.status);
+      console.log("📡 Envoi requête vers le serveur local...");
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Erreur API Whisper:', response.status, errorText);
-        throw new Error(`Erreur API: ${response.status} - ${errorText}`);
-      }
+      const data = await postFormData<{ text: string }>("/v1/transcribe", formData);
 
-      const data = await response.json();
-      console.log('✅ Données reçues de Whisper:', data);
-      
+      console.log("📡 Réponse reçue:", data);
+
       if (data.text) {
-        console.log('📝 Transcription:', data.text);
+        console.log("📝 Transcription:", data.text);
         onTranscript(data.text.trim());
         toast.success("Transcription réussie!");
       } else {
-        console.warn('⚠️ Pas de texte dans la réponse');
+        console.warn("⚠️ Pas de texte dans la réponse");
         toast.warning("Aucun texte détecté dans l'audio");
       }
     } catch (error) {
-      console.error('❌ Erreur transcription Whisper:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue';
-      toast.error(`Erreur Whisper: ${errorMessage}`);
+      console.error("❌ Erreur transcription locale:", error);
+      const errorMessage = error instanceof Error ? error.message : "Erreur inconnue";
+      toast.error(`Erreur de transcription: ${errorMessage}`);
     }
-  }, [apiKey, onTranscript]);
+  }, [onTranscript]);
 
   const startListening = useCallback(async () => {
     try {
@@ -124,15 +104,15 @@ export const useSpeechToText = ({ onTranscript, apiKey }: SpeechToTextOptions) =
           return;
         }
         
-        // Transcrire avec Whisper
+        // Transcrire avec le serveur local
         setIsProcessing(true);
-        await transcribeWithWhisper(audioBlob);
+        await transcribeLocally(audioBlob);
         setIsProcessing(false);
         setIsListening(false);
       };
 
       mediaRecorder.onerror = (event) => {
-        console.error('Erreur MediaRecorder:', event);
+        console.error("Erreur MediaRecorder:", event);
         toast.error("Erreur lors de l'enregistrement audio");
         setIsListening(false);
         setIsProcessing(false);
@@ -142,12 +122,11 @@ export const useSpeechToText = ({ onTranscript, apiKey }: SpeechToTextOptions) =
       mediaRecorder.start(1000); // Collecter les données toutes les secondes
       setIsListening(true);
       toast.success("Enregistrement en cours... Parlez maintenant");
-      
     } catch (error) {
-      console.error('Erreur accès microphone:', error);
+      console.error("Erreur accès microphone:", error);
       toast.error("Impossible d'accéder au microphone");
     }
-  }, [transcribeWithWhisper]);
+  }, [transcribeLocally]);
 
   const stopListening = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {

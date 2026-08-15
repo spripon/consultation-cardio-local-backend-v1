@@ -99,21 +99,17 @@ export const useCardiologyForm = () => {
     });
   };
 
-  const [openAIApiKey, setOpenAIApiKey] = useState(() => {
-    return localStorage.getItem('openai-api-key') || '';
-  });
-
-  const handleOpenAIApiKeyChange = (key: string) => {
-    setOpenAIApiKey(key);
-    localStorage.setItem('openai-api-key', key);
-  };
+  // Legacy cleanup: remove any previously stored OpenAI key from localStorage
+  try {
+    localStorage.removeItem("openai-api-key");
+  } catch {
+    // ignore
+  }
 
   return {
     formData,
     handleChange,
     handleGenderChange,
     handleReset,
-    openAIApiKey,
-    handleOpenAIApiKeyChange,
   };
 };

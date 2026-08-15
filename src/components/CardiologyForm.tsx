@@ -3,7 +3,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import CardiologyFormTabs from "./cardiology/CardiologyFormTabs";
-import { ApiKeyInput } from "./cardiology/ApiKeyInput";
 import { MedicalImageExtractor } from "./cardiology/MedicalImageExtractor";
 import { useCardiologyForm } from "@/hooks/useCardiologyForm";
 
@@ -13,8 +12,6 @@ const CardiologyForm = () => {
     handleChange,
     handleGenderChange,
     handleReset,
-    openAIApiKey,
-    handleOpenAIApiKeyChange,
   } = useCardiologyForm();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,22 +29,15 @@ const CardiologyForm = () => {
           </h1>
         </div>
 
-        <ApiKeyInput 
-          openAIApiKey={openAIApiKey}
-          onOpenAIApiKeyChange={handleOpenAIApiKeyChange}
-        />
-
         <MedicalImageExtractor
           formData={formData}
           onChange={handleChange}
-          openAIApiKey={openAIApiKey}
         />
 
         <CardiologyFormTabs 
           formData={formData}
           onChange={handleChange}
           onGenderChange={handleGenderChange}
-          apiKey={openAIApiKey}
         />
 
         <div className="mt-8 flex justify-end space-x-4">

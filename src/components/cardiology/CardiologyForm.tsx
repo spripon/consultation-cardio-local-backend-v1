@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useCardiologyForm } from "@/hooks/useCardiologyForm";
 import { generateCardiologyWordDocument } from "@/utils/cardiologyWordGenerator";
-import { ApiKeyInput } from "./ApiKeyInput";
 import { MedicalImageExtractor } from "./MedicalImageExtractor";
 import PatientInfoSection from "./PatientInfoSection";
 import ConsultationReasonSection from "./ConsultationReasonSection";
@@ -19,8 +18,6 @@ const CardiologyForm = () => {
     handleChange,
     handleGenderChange,
     handleReset,
-    openAIApiKey,
-    handleOpenAIApiKeyChange,
   } = useCardiologyForm();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -43,15 +40,9 @@ const CardiologyForm = () => {
           </h1>
         </div>
 
-        <ApiKeyInput 
-          openAIApiKey={openAIApiKey}
-          onOpenAIApiKeyChange={handleOpenAIApiKeyChange}
-        />
-
         <MedicalImageExtractor
           formData={formData}
           onChange={handleChange}
-          openAIApiKey={openAIApiKey}
         />
 
         <div className="space-y-8">
@@ -74,19 +65,16 @@ const CardiologyForm = () => {
           <ClinicalHistorySection 
             formData={formData} 
             onChange={handleChange}
-            apiKey={openAIApiKey}
           />
           
           <ExaminationSection 
             formData={formData} 
             onChange={handleChange}
-            apiKey={openAIApiKey}
           />
           
           <ConclusionSection 
             formData={formData} 
             onChange={handleChange}
-            apiKey={openAIApiKey}
           />
         </div>
 

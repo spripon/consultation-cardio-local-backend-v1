@@ -10,6 +10,8 @@ interface ImageUploadProps {
   selectedImage?: File | null;
   className?: string;
   disabled?: boolean;
+  accept?: string;
+  capture?: "user" | "environment" | boolean;
 }
 
 export const ImageUpload = ({ 
@@ -17,13 +19,17 @@ export const ImageUpload = ({
   onImageRemove, 
   selectedImage, 
   className,
-  disabled 
+  disabled,
+  accept = "image/*",
+  capture,
 }: ImageUploadProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
   const handleFileSelect = (file: File) => {
-    if (file.type.startsWith('image/')) {
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf';
+    if (isImage || isPdf) {
       onImageSelect(file);
     }
   };
@@ -69,7 +75,8 @@ export const ImageUpload = ({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept={accept}
+          capture={capture}
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ImageUpload } from '@/components/ui/image-upload';
-import { useOpenAIVision } from '@/hooks/useOpenAIVision';
+import { useLocalExtraction } from '@/hooks/useLocalExtraction';
 import { CardiologyFormData } from './types';
 import { toast } from 'sonner';
 import { Loader2, Sparkles } from 'lucide-react';
@@ -10,41 +10,37 @@ import { Loader2, Sparkles } from 'lucide-react';
 interface MedicalImageExtractorProps {
   formData: CardiologyFormData;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  openAIApiKey?: string;
 }
 
 export const MedicalImageExtractor = ({ 
   formData, 
   onChange, 
-  openAIApiKey 
 }: MedicalImageExtractorProps) => {
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const { extractMedicalText, isExtracting, error } = useOpenAIVision();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [anonymizedPreview, setAnonymizedPreview] = useState<string | null>(null);
+  const { extractMedicalText, isExtracting, error } = useLocalExtraction();
 
-  const handleImageSelect = (file: File) => {
-    setSelectedImage(file);
+  const handleFileSelect = (file: File) => {
+    setSelectedFile(file);
+    setAnonymizedPreview(null);
   };
 
-  const handleImageRemove = () => {
-    setSelectedImage(null);
+  const handleFileRemove = () => {
+    setSelectedFile(null);
+    setAnonymizedPreview(null);
   };
 
   const handleExtractText = async () => {
-    if (!selectedImage) {
-      toast.error('Veuillez sélectionner une image');
-      return;
-    }
-
-    if (!openAIApiKey) {
-      toast.error('Clé API OpenAI requise');
+    if (!selectedFile) {
+      toast.error('Veuillez sélectionner un document');
       return;
     }
 
     try {
-      const extractedData = await extractMedicalText(selectedImage, openAIApiKey);
+      const result = await extractMedicalText(selectedFile);
       
-      // Update form data with extracted information
-      Object.entries(extractedData).forEach(([key, value]) => {
+      // Update form data with extracted and categorized fields
+      Object.entries(result.fields).forEach(([key, value]) => {
         if (value && typeof value === 'string') {
           const event = {
             target: {
@@ -56,8 +52,13 @@ export const MedicalImageExtractor = ({
         }
       });
 
-      toast.success('Texte extrait et catégorisé avec succès !');
-      setSelectedImage(null); // Clear image after successful extraction
+      setAnonymizedPreview(result.rawTextAnonymized);
+
+      if (result.warnings.length > 0) {
+        result.warnings.forEach((warning) => toast.warning(warning));
+      } else {
+        toast.success('Texte extrait et catégorisé avec succès !');
+      }
       
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erreur lors de l\'extraction';
@@ -71,19 +72,21 @@ export const MedicalImageExtractor = ({
         <div className="flex items-center space-x-2">
           <Sparkles className="h-5 w-5 text-blue-600" />
           <h3 className="text-lg font-semibold text-blue-900">
-            Extraction automatique depuis une photo
+            Extraction automatique depuis une photo ou un PDF
           </h3>
         </div>
         
         <p className="text-sm text-blue-700">
-          Téléversez une photo d'un compte-rendu médical pour extraire et catégoriser automatiquement le texte dans les bonnes sections.
+          Téléversez une photo ou un PDF d'un compte-rendu médical pour extraire et catégoriser automatiquement le texte dans les bonnes sections. Le document est traité localement.
         </p>
 
         <ImageUpload
-          onImageSelect={handleImageSelect}
-          onImageRemove={handleImageRemove}
-          selectedImage={selectedImage}
+          onImageSelect={handleFileSelect}
+          onImageRemove={handleFileRemove}
+          selectedImage={selectedFile}
           disabled={isExtracting}
+          accept="image/*,application/pdf"
+          capture="environment"
         />
 
         {error && (
@@ -92,9 +95,16 @@ export const MedicalImageExtractor = ({
           </div>
         )}
 
+        {anonymizedPreview && (
+          <div className="text-sm text-blue-800 bg-blue-100/50 p-3 rounded border border-blue-200">
+            <p className="font-medium mb-1">Texte anonymisé :</p>
+            <p className="whitespace-pre-wrap">{anonymizedPreview}</p>
+          </div>
+        )}
+
         <Button
           onClick={handleExtractText}
-          disabled={!selectedImage || isExtracting || !openAIApiKey}
+          disabled={!selectedFile || isExtracting}
           className="w-full bg-blue-600 hover:bg-blue-700"
         >
           {isExtracting ? (
@@ -109,12 +119,6 @@ export const MedicalImageExtractor = ({
             </>
           )}
         </Button>
-
-        {!openAIApiKey && (
-          <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
-            ⚠️ Clé API OpenAI requise pour utiliser cette fonctionnalité
-          </p>
-        )}
       </div>
     </Card>
   );
