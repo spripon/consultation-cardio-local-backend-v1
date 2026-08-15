@@ -2,27 +2,29 @@
 
 ```
 LOVABLE_BASELINE_SHA=de542fee77a69ee355d920b33b80f0387148f059
+GITHUB_BASELINE_SHA=de542fee77a69ee355d920b33b80f0387148f059
 ```
 
-Ce SHA identifie l'état du projet Lovable **audité** (runtime 100 % local, OCR/PII/
-catégorisation locales, fail-closed) juste avant l'ajout des outils de préparation
-au déploiement Ubuntu.
+Ce SHA identifie l'état applicatif **audité** : runtime local, OCR/PII/catégorisation locales et comportement fail-closed, avant l'ajout des outils de préparation au déploiement Ubuntu.
 
-## Portée
+## Gel GitHub
 
-- Aucune logique clinique, OCR, anonymisation PII ou frontend n'a été modifiée
-  après ce SHA par la préparation Ubuntu : seuls des fichiers de déploiement,
-  scripts et documentation ont été ajoutés.
-- Ce SHA est la référence de revue / de rollback fonctionnel.
+La synchronisation Lovable → GitHub a conservé l'historique Git et les SHA : le commit GitHub correspondant est exactement `de542fee77a69ee355d920b33b80f0387148f059`.
 
-## Rapport avec GitHub
+La branche GitHub immuable de référence est :
 
-Le SHA GitHub obtenu lors du premier sync Lovable → GitHub **sera différent** de
-`de542fee77a69ee355d920b33b80f0387148f059`. La synchronisation crée un historique
-Git propre côté dépôt ; il ne s'agit pas d'un miroir des commits Lovable, et il
-n'existe aucun moyen de forcer l'égalité des SHA. Ne jamais supposer ni annoncer
-qu'ils sont identiques.
+```
+baseline/lovable-de542fee
+```
 
-Pour tracer un déploiement, conserver **le SHA GitHub réellement déployé** (voir
-la section backup/rollback de `deploy/README_UBUNTU.md`) et, en commentaire, le
-SHA Lovable de référence ci-dessus.
+Elle pointe exactement sur ce commit et ne doit pas être utilisée comme branche de développement.
+
+## Branche de déploiement
+
+Le déploiement Ubuntu V1 utilise la branche :
+
+```
+release/ubuntu-v1
+```
+
+Cette branche contient la baseline auditée plus uniquement les correctifs et outils de déploiement Ubuntu validés. Pour tracer un déploiement, conserver le SHA GitHub réellement déployé avec la date de mise en production.
