@@ -54,7 +54,9 @@ def _sniff_mime(data: bytes, declared: str) -> str:
             return mime
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
-    if data[4:8] == b"ftyp" and b"heic" in data[8:24].lower() or data[4:12].lower().startswith(b"ftypheif"):
+    if data[4:8] == b"ftyp" and (
+        b"heic" in data[8:24].lower() or b"heif" in data[8:24].lower() or b"mif1" in data[8:24].lower()
+    ):
         return "image/heic"
     if declared in ALLOWED_MIME:
         return declared
