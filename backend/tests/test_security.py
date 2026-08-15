@@ -95,3 +95,11 @@ def test_readyz_reports_missing_speech_when_enabled(client, monkeypatch):
     response = client.get("/api/v1/readyz")
     assert response.status_code == 503
     assert "speech" in response.json()["missing"]
+
+
+def test_anonymization_is_idempotent():
+    """La revalidation de /categorize ne doit pas « re-masquer » les jetons."""
+    once = anonymize(SYNTHETIC_REPORT, require_openmed=False).text
+    twice = anonymize(once, require_openmed=False)
+    assert twice.text == once
+    assert twice.safe_to_inject is True
