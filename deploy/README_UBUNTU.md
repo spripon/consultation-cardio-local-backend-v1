@@ -1,217 +1,250 @@
-# Installation reproductible sur Ubuntu (CPU-only, 100 % local)
+# Installation Ubuntu - mode Cloudflare Tunnel
 
-Guide pas-à-pas pour héberger l'application sur un serveur Ubuntu que vous
-contrôlez. **Aucune donnée patient ne sort du serveur** : OCR, anonymisation PII
-et catégorisation sont exécutées localement dans un conteneur sans accès Internet.
+Architecture cible : `consultation.cardiologie-tarbes.org` est publie par le Cloudflare Tunnel deja utilise sur ce serveur, notamment pour `planning.cardiologie-tarbes.org`. Le nouveau service local est `http://127.0.0.1:8091`.
 
-> Avertissement : avant tout traitement de données patients réelles, une
-> validation DSI / DPO / établissement est **obligatoire** (analyse d'impact,
-> registre des traitements, hébergement). L'anonymisation automatique n'est pas
-> garantie : la relecture humaine reste obligatoire dans l'interface.
-
-Baseline auditée : voir [`docs/BASELINE.md`](../docs/BASELINE.md).
-
-## 0. Prérequis matériels
-
-- Ubuntu 22.04 / 24.04 LTS, x86_64 ou aarch64, **CPU uniquement**
-- 8 Go de RAM recommandés (4 Go minimum), 15 Go de disque libre
-- Ports 80 et 443 libres, accessibles depuis Internet si domaine public
-
-## 1. Dépendances hôte (optionnel mais recommandé)
-
-```bash
-bash deploy/install-host-deps.sh        # demande confirmation avant apt-get
-sudo usermod -aG docker "$USER"          # puis rouvrir la session
-docker compose version                   # doit fonctionner
+```text
+Internet HTTPS
+  -> Cloudflare
+  -> cloudflared sur l'hote Ubuntu
+  -> http://127.0.0.1:8091
+  -> cardio-web / Caddy :80
+  -> frontend + /api/*
+  -> cardio-api / FastAPI :8000 (Docker interne uniquement)
 ```
 
-Le script installe `git`, `curl`, `ca-certificates`, `python3`, `python3-venv`,
-`python3-pip`, puis un Docker avec **Compose v2** :
+Le backend n'a aucun port hote publie. Le frontend n'est pas lie a l'IP Tailscale ni a `0.0.0.0`, uniquement a `127.0.0.1:8091`. Les ports 80/443 de l'hote ne sont pas necessaires pour cette application.
 
-- si `docker compose version` fonctionne déjà, Docker n'est pas touché ;
-- sinon, `docker.io` + `docker-compose-v2` (paquets **Ubuntu**) ;
-- sinon `docker-ce` + `docker-compose-plugin` (paquets du **dépôt Docker
-  officiel**, s'il est déjà configuré) ;
-- sinon le script s'arrête et renvoie vers la procédure officielle Docker CE
-  (ajout manuel du dépôt APT : clé GPG + source). Aucun `curl | sh`.
+> Avant toute donnee patient reelle : validation DSI/DPO/etablissement, validation de l'hebergement et de la securite. Les tests d'installation sont exclusivement synthetiques.
 
-Aucun paquet Docker existant n'est désinstallé, aucune règle de firewall n'est
-ajoutée, aucun tunnel n'est configuré.
-
-**Node/npm ne sont pas nécessaires sur l'hôte** : le frontend est compilé dans
-l'image Docker `web` (`deploy/Dockerfile.web`, étape builder `node:22-alpine`).
-Tesseract et ocrmypdf sont embarqués dans l'image API.
-
-## 2. Cloner le dépôt
-
-Utilisez la branche de déploiement stable `release/ubuntu-v1` :
+## 1. Cloner la release stable
 
 ```bash
+sudo mkdir -p /opt/consultation-cardio-local-backend-v1
+sudo chown "$USER":"$USER" /opt/consultation-cardio-local-backend-v1
+
 git clone --branch release/ubuntu-v1 --single-branch \
-  https://github.com/spripon/consultation-cardio-local-backend-v1.git
-cd consultation-cardio-local-backend-v1
+  https://github.com/spripon/consultation-cardio-local-backend-v1.git \
+  /opt/consultation-cardio-local-backend-v1
+
+cd /opt/consultation-cardio-local-backend-v1
+git rev-parse HEAD
 ```
 
-## 3. Configuration locale
+Conserver le SHA deploye dans le manifeste local.
+
+## 2. Inventaire avant modification
+
+```bash
+docker --version || true
+docker compose version || true
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
+ss -ltnp 2>/dev/null | grep -E ':(8091|80|443)\b' || true
+cloudflared --version || true
+systemctl is-active cloudflared 2>/dev/null || true
+```
+
+Ne jamais arreter automatiquement un autre service. Un conflit sur 8091 doit etre signale ; ne pas tuer le processus existant.
+
+## 3. Dependances hote
+
+```bash
+bash deploy/install-host-deps.sh --yes
+sudo systemctl enable --now docker
+docker compose version
+docker info
+```
+
+Si l'utilisateur n'a pas acces a Docker : `sudo usermod -aG docker "$USER"`, puis nouvelle session si necessaire.
+
+## 4. Configuration locale
 
 ```bash
 make -f deploy/Makefile prepare-config
+chmod 600 backend/.env deploy/caddy.env
 ```
 
-Crée `backend/.env` et `deploy/caddy.env` depuis les exemples (jamais écrasés,
-`chmod 600`). Ces deux fichiers sont **obligatoires** et **jamais committés**.
+Valeurs importantes dans `backend/.env` :
 
-Puis éditez `backend/.env` :
-
-```
+```env
 APP_ENV=production
 CORS_ORIGINS=https://consultation.cardiologie-tarbes.org
+OPENMED_POLICY=gdpr_pseudonymization
+OPENMED_PII_MODEL=/models/openmed-pii-fr
+OPENMED_LANGUAGE=fr
 REQUIRE_OPENMED=true
+HF_HUB_OFFLINE=true
+OPENMED_OFFLINE=true
 ALLOW_RAW_OCR_DEBUG=false
-ENABLE_SPEECH=false          # true seulement si le modèle Whisper est installé
+ENABLE_SPEECH=false
 ```
 
-### Basic Auth (obligatoire, fail-closed)
+Generer le Basic Auth localement. Le hash bcrypt doit etre single-quoted :
 
-Générez un hash bcrypt **localement** :
-
-```bash
-docker run --rm -it caddy:2.8-alpine caddy hash-password
-```
-
-Reportez la sortie dans `deploy/caddy.env` :
-
-```
+```env
 BASIC_AUTH_USER=cardio
 BASIC_AUTH_HASH='$2a$14$...'
 ```
 
-Les **apostrophes simples autour du hash sont obligatoires** : sans elles,
-Docker Compose interprète les `$` du hash bcrypt comme des variables et
-transmet une valeur tronquée à Caddy (authentification cassée). Le préflight
-refuse un hash non quoté ou resté au placeholder.
+Ne jamais committer `backend/.env`, `deploy/caddy.env`, mots de passe ou modeles.
 
-Le mot de passe en clair ne doit jamais être écrit dans un fichier du dépôt,
-committé, ni transmis par messagerie. Si `deploy/caddy.env` est absent,
-`docker compose up` **échoue** : le site public ne peut pas démarrer sans
-authentification.
-
-## 4. Télécharger les modèles (phase installation, avec réseau)
+## 5. Modele OpenMed local
 
 ```bash
-make -f deploy/Makefile models          # modèle PII français OpenMed 2.0
-make -f deploy/Makefile models-speech   # + faster-whisper small (si dictée)
+make -f deploy/Makefile models
+test -n "$(ls -A deploy/models/openmed-pii-fr)"
 ```
 
-Le script crée un venv d'installation dédié `deploy/.venv-models` (Ubuntu récent
-refuse `pip install --user`, PEP 668) et y installe `huggingface_hub`. Aucun
-jeton Hugging Face n'est nécessaire : les modèles sont publics.
+Le telechargement Hugging Face est une phase d'installation sans donnee patient. Le runtime API reste offline.
 
-Les poids vont dans `deploy/models/` (ignoré par Git) et sont montés en lecture
-seule sous `/models` dans le conteneur. Après cette étape, le runtime est de
-nouveau strictement hors ligne (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`) et
-aucun téléchargement n'est possible pendant un traitement.
-
-## 5. Construire les images
-
-```bash
-make -f deploy/Makefile build     # docker compose build : web (frontend) + api
-```
-
-Le frontend est compilé dans l'image `web` ; rien n'est construit sur l'hôte et
-aucun répertoire `dist/` hôte n'est utilisé. Le contexte de build est filtré par
-le `.dockerignore` racine : ni `backend/.env`, ni `deploy/caddy.env`, ni
-`deploy/models/` n'entrent dans une image.
-
-## 6. Vérifier puis démarrer
-
-```bash
-make -f deploy/Makefile preflight   # lecture seule : rien n'est modifié
-make -f deploy/Makefile validate    # no-egress + compose config + build API
-make -f deploy/Makefile up          # dépend de preflight
-```
-
-`bash deploy/validate-install.sh --start` démarre la pile puis valide, sans
-jamais lire ni afficher `BASIC_AUTH_HASH` et sans mot de passe en clair :
-
-1. Caddy interrogé localement avec le bon Host/SNI
-   (`curl --resolve consultation.cardiologie-tarbes.org:443:127.0.0.1`) : un
-   **HTTP 401** sans identifiants prouve que Basic Auth est actif ;
-2. `/api/v1/health` et `/api/v1/readyz` sondés **directement dans le conteneur
-   API** (`docker compose exec -T api`), qui doivent répondre **200** ;
-3. si `readyz` renvoie 503, le script sort en code non nul et affiche les
-   composants `missing` (fail-closed, aucun contenu patient).
-
-Le script ne sort en 0 que si les trois contrôles passent.
-
-Le préflight tolère les ports 80/443 occupés **par le conteneur attendu
-`cardio-web` déjà démarré** : `make up` reste donc idempotent sur une pile en
-cours d'exécution. Tout autre occupant du port fait échouer le préflight.
-
-## 7. DNS pour `consultation.cardiologie-tarbes.org`
-
-- Enregistrement `A` → adresse IPv4 publique du serveur (et `AAAA` si IPv6).
-- Aucun proxy tiers : le trafic doit arriver **directement** sur Caddy, qui
-  obtient le certificat TLS via ACME/Let's Encrypt.
-- **Exigence « aucun contenu patient via un tiers » : n'utilisez pas Cloudflare
-  Tunnel, ni le proxy orange de Cloudflare, ni un reverse proxy externe.** Ces
-  services déchiffrent le trafic et verraient donc le contenu transmis. DNS
-  direct + Caddy uniquement.
-- Ports 80 (ACME) et 443 doivent être joignables depuis Internet.
-
-## 8. Vérification no-egress
-
-Depuis le dépôt :
+## 6. Build et validation locale
 
 ```bash
 bash scripts/verify_no_egress.sh
+make -f deploy/Makefile build
+make -f deploy/Makefile preflight
+bash deploy/validate-install.sh --start
 ```
 
-Depuis le conteneur API (doit échouer : réseau Docker `internal: true`, donc
-aucune route de sortie) :
+La validation locale exige :
+
+- `http://127.0.0.1:8091/` -> HTTP 401 sans credentials ;
+- listener 8091 uniquement sur `127.0.0.1` ;
+- `/api/v1/health` -> 200 ;
+- `/api/v1/readyz` -> 200 ;
+- connexion TCP sortante du conteneur API impossible.
+
+Tesseract :
 
 ```bash
-docker compose -f deploy/docker-compose.yml exec api python -c \
-  "import socket; socket.create_connection(('1.1.1.1', 443), timeout=5)"
-# attendu : OSError / timeout
-
-docker compose -f deploy/docker-compose.yml exec api python -c \
-  "import socket; print(socket.gethostbyname('example.com'))"
-# attendu : échec de résolution
+docker compose -f deploy/docker-compose.yml exec -T api tesseract --list-langs
 ```
 
-## 9. Sauvegarde et rollback
+`fra` et `eng` doivent etre presents.
 
-- Notez **le SHA GitHub déployé** : `git rev-parse HEAD` (à conserver hors
-  serveur, avec la date de mise en production).
-- Sauvegardez `backend/.env` et `deploy/caddy.env` hors dépôt, en coffre-fort.
-  `deploy/models/` peut être re-téléchargé, pas besoin de le sauvegarder.
-- Rollback :
+## 7. Ajouter le hostname au Cloudflare Tunnel existant
+
+Voir `deploy/CLOUDFLARE_TUNNEL.md`.
+
+### Tunnel gere dans le Dashboard Cloudflare
+
+Dans `Networking -> Tunnels`, ouvrir le tunnel existant qui publie deja `planning.cardiologie-tarbes.org`, puis :
+
+1. `Routes` -> `Add route` -> `Published application`.
+2. Hostname : `consultation.cardiologie-tarbes.org`.
+3. Service URL : `http://localhost:8091`.
+4. Enregistrer.
+
+Un meme tunnel peut publier plusieurs applications ; il n'est pas necessaire de creer un second tunnel.
+
+### Tunnel gere par /etc/cloudflared/config.yml
+
+Sauvegarder avant modification :
 
 ```bash
-make -f deploy/Makefile down
-git checkout <sha-github-precedent>
-make -f deploy/Makefile build      # reconstruit web + api depuis ce SHA
-make -f deploy/Makefile up
+sudo cp /etc/cloudflared/config.yml \
+  /etc/cloudflared/config.yml.backup-$(date +%Y%m%d-%H%M%S)
 ```
 
-## 10. Mises à jour
+Ajouter avant le catch-all final :
 
-Jamais d'auto-update. Après revue et validation d'une nouvelle version :
+```yaml
+- hostname: consultation.cardiologie-tarbes.org
+  service: http://localhost:8091
+```
+
+Conserver la route planning existante et la regle finale :
+
+```yaml
+- service: http_status:404
+```
+
+Valider :
 
 ```bash
-git fetch origin release/ubuntu-v1
-git log --oneline HEAD..origin/release/ubuntu-v1          # revue
-git merge --ff-only origin/release/ubuntu-v1
-make -f deploy/Makefile build validate up
+sudo cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
 ```
 
-## 11. Arrêt d'urgence
+Puis seulement si OK :
+
+```bash
+sudo systemctl restart cloudflared
+sudo systemctl status cloudflared --no-pager
+```
+
+Ne pas executer `cloudflared tunnel route dns` tant que le mode de gestion du tunnel existant et son identifiant n'ont pas ete confirmes.
+
+## 8. Valider le chemin public
+
+```bash
+bash deploy/validate-cloudflare-tunnel.sh
+```
+
+Attendu :
+
+- cloudflared present ;
+- origine locale 401 ;
+- 8091 sur loopback uniquement ;
+- DNS resolu ;
+- `https://consultation.cardiologie-tarbes.org/` -> HTTP 401 sans credentials.
+
+Si le public renvoie 502, verifier d'abord :
+
+```bash
+curl -I http://127.0.0.1:8091
+```
+
+Si le local fonctionne mais le public est 502, verifier la Service URL du Published application et les logs cloudflared.
+
+## 9. Tests synthetiques PII/categorisation
+
+Avant toute donnee reelle, tester `/api/v1/anonymize` et `/api/v1/categorize` avec des identites entierement fictives. `safeToInject` doit etre `true` apres suppression des identifiants synthetiques.
+
+## 10. Manifeste local
+
+```bash
+sudo mkdir -p /var/lib/consultation-cardio
+sudo sh -c '{
+  echo "deployed_at=$(date -Is)"
+  echo "repo=https://github.com/spripon/consultation-cardio-local-backend-v1.git"
+  echo "branch=release/ubuntu-v1"
+  echo "git_sha=$(git -C /opt/consultation-cardio-local-backend-v1 rev-parse HEAD)"
+  echo "baseline_sha=de542fee77a69ee355d920b33b80f0387148f059"
+} > /var/lib/consultation-cardio/deployment-manifest.txt'
+sudo chmod 600 /var/lib/consultation-cardio/deployment-manifest.txt
+```
+
+## 11. Arret / rollback
+
+Arreter uniquement cette pile :
 
 ```bash
 docker compose -f deploy/docker-compose.yml down
 ```
 
-Le service est immédiatement injoignable. Les fichiers temporaires OCR vivent en
-`tmpfs` et disparaissent à l'arrêt du conteneur ; les volumes Caddy (certificats)
-sont conservés.
+Ne jamais utiliser `docker system prune`, `docker volume prune` ou une commande globale susceptible d'affecter Hermes/DeepECG/autres conteneurs.
+
+Rollback code :
+
+```bash
+git checkout <SHA_PRECEDENT_VALIDE>
+make -f deploy/Makefile build
+make -f deploy/Makefile up
+```
+
+## 12. Dictee locale ulterieure
+
+Apres validation de la V1 OCR/PII :
+
+```bash
+make -f deploy/Makefile models-speech
+```
+
+Puis `ENABLE_SPEECH=true` dans `backend/.env` et rebuild API. Tester uniquement avec audio synthetique d'abord.
+
+## 13. Documentation officielle Cloudflare
+
+- https://developers.cloudflare.com/tunnel/setup/
+- https://developers.cloudflare.com/tunnel/routing/
+- https://developers.cloudflare.com/tunnel/advanced/local-management/configuration-file/
+
+Cloudflare Tunnel etablit des connexions sortantes de `cloudflared` vers le reseau Cloudflare ; aucun port entrant 80/443 n'est requis pour l'origine locale dans cette architecture.
