@@ -3,7 +3,8 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    TRANSFORMERS_OFFLINE=1 \
+    OPENMED_OFFLINE=1
 
 # Dépendances système pour OCR local (aucun accès réseau nécessaire au runtime)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -22,10 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Torch CPU-only : indispensable pour tenir dans 16 Go de RAM sans GPU.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
 
+# Les tests ne sont pas embarqués dans l'image de production.
 COPY app ./app
-COPY tests ./tests
 
 RUN useradd --create-home --uid 10001 cardio \
     && mkdir -p /tmp/consultation-cardio \
@@ -35,6 +38,6 @@ USER cardio
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).status==200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/readyz', timeout=4).status==200 else 1)"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
