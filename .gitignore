@@ -34,3 +34,4 @@ venv/
 backend/.env
 deploy/models/
 deploy/caddy-auth/*.conf
+deploy/caddy.env
