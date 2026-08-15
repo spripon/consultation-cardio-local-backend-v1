@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 PATTERNS=(
   "api\.openai\.com"
-  "api\.openai\.com"
+  "openai\.azure"
   "anthropic"
   "googleapis\.com"
   "generativelanguage"
