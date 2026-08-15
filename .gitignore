@@ -34,3 +34,9 @@ venv/
 backend/.env
 deploy/models/
 deploy/caddy.env
+
+# Sauvegardes et journaux locaux de deploiement
+*.bak
+*.orig
+backups/
+deploy/logs/
