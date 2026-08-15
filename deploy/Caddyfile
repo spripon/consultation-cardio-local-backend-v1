@@ -1,18 +1,19 @@
-# Remplacer par le domaine réel ; utiliser :80 pour un test LAN sans TLS.
-consultation.cardiologie-tarbes.org {
+:80 {
 	encode zstd gzip
 
-	# Contrôle d'accès OBLIGATOIRE (fail-closed) : aucune configuration
-	# optionnelle, aucun glob tolérant l'absence de fichier. Les identifiants
-	# proviennent de deploy/caddy.env (env_file obligatoire dans compose) et ne
-	# sont JAMAIS committés. Générer le hash :
-	#   docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<motdepasse>'
-	# Le mot de passe en clair ne doit jamais figurer dans Git ni dans caddy.env.
+	# Origine HTTP locale uniquement. Le HTTPS public est termine par Cloudflare,
+	# puis cloudflared relaie vers http://127.0.0.1:8091 sur l'hote.
+	# Caddy n'effectue donc aucun ACME/Let's Encrypt dans ce mode.
+
+	# Controle d'acces OBLIGATOIRE (fail-closed). Les identifiants proviennent
+	# de deploy/caddy.env (env_file obligatoire dans compose) et ne sont jamais
+	# committes. BASIC_AUTH_HASH doit rester single-quoted dans caddy.env.
 	basic_auth * {
 		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
 	}
 
 	header {
+		# Ces en-tetes sont transmis par Cloudflare au navigateur final.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
@@ -20,20 +21,19 @@ consultation.cardiologie-tarbes.org {
 		Permissions-Policy "microphone=(self), camera=(self), geolocation=()"
 		Cross-Origin-Opener-Policy "same-origin"
 		Cross-Origin-Resource-Policy "same-origin"
-		# CSP compatible avec le bundle Vite (styles injectés) et strictement même origine :
-		# aucune connexion sortante vers un service tiers n'est autorisée par le navigateur.
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 
-	# API locale : même origine que le frontend, donc pas de CORS en production.
+	# API locale : meme origine publique que le frontend. FastAPI reste
+	# uniquement joignable sur le reseau Docker interne, jamais publie sur l'hote.
 	handle /api/* {
 		reverse_proxy api:8000 {
 			header_up X-Request-Id {http.request.uuid}
 		}
 	}
 
-	# Frontend statique (build Vite).
+	# Frontend statique (build Vite embarque dans l'image web).
 	handle {
 		root * /srv/www
 		try_files {path} /index.html
@@ -44,7 +44,7 @@ consultation.cardiologie-tarbes.org {
 		max_size 20MB
 	}
 
-	# Journalisation sans contenu patient.
+	# Journalisation sans corps de requete ni contenu patient.
 	log {
 		output file /data/access.log
 		format json
