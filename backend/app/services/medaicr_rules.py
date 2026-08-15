@@ -298,7 +298,9 @@ def safety_sweep(text: str) -> list[Finding]:
             continue
         for match in pattern.finditer(text):
             value = _clean_value(match.group(0))
-            if not value or value.startswith("["):
+            # Un fragment contenant déjà un jeton d'anonymisation n'est pas un
+            # résidu : c'est du texte déjà masqué (ex. « [ADRESSE] : Dr [MEDECIN] »).
+            if not value or "[" in value or "]" in value:
                 continue
             if pii_type in _NAME_LIKE_TYPES and not _is_plausible_name(value):
                 continue
