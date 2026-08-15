@@ -46,10 +46,12 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # OBLIGATOIRE : identifiants Basic Auth. Si deploy/caddy.env est absent,
+    # `docker compose up` échoue au lieu de publier un site sans authentification.
+    env_file:
+      - ./caddy.env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Basic Auth optionnelle : fichiers *.conf jamais committés (voir README).
-      - ./caddy-auth:/etc/caddy/auth:ro
       - ../dist:/srv/www:ro
       - caddy_data:/data
       - caddy_config:/config

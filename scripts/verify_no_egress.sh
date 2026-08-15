@@ -28,15 +28,19 @@ FORBIDDEN=(
   "ocr_engine=mock"
 )
 
-# Portée : uniquement le code réellement exécuté au runtime.
-SCOPE=(src backend/app)
+# Portée : le code réellement exécuté au runtime (frontend, backend et scripts
+# runtime). Seul scripts/download_openmed_model.py est exclu : étape
+# d'installation hors runtime, exécutée manuellement sur l'hôte.
+SCOPE=(src backend/app scripts)
+EXCLUDE_RE='^(scripts/download_openmed_model\.py|scripts/verify_no_egress\.sh|src/lib/legacyCleanup\.ts):'
+
 
 STATUS=0
 for pattern in "${FORBIDDEN[@]}"; do
   # src/lib/legacyCleanup.ts est exclu : il ne contient qu'une liste de clés
   # d'API héritées à SUPPRIMER du navigateur, aucun appel réseau.
   if matches=$(grep -rniE "$pattern" "${SCOPE[@]}" 2>/dev/null \
-      | grep -v '^src/lib/legacyCleanup\.ts:'); then
+      | grep -vE "$EXCLUDE_RE"); then
     echo "✗ Référence cloud interdite trouvée pour /$pattern/ :"
     echo "$matches"
     STATUS=1
@@ -46,6 +50,7 @@ done
 # Aucune URL absolue http(s) ne doit apparaître dans le code exécutable :
 # tous les appels doivent être relatifs à la même origine.
 if urls=$(grep -rnoE "https?://[A-Za-z0-9.-]+" "${SCOPE[@]}" 2>/dev/null \
+    | grep -vE "$EXCLUDE_RE" \
     | grep -viE "127\.0\.0\.1|localhost|www\.w3\.org|schema\.org|example\.invalid"); then
   echo "✗ URL absolue interdite dans le code exécutable :"
   echo "$urls"
@@ -60,6 +65,6 @@ if mocks=$(grep -rniE "mock|fake" backend/app 2>/dev/null); then
 fi
 
 if [ "$STATUS" -eq 0 ]; then
-  echo "✓ Aucun appel réseau externe ni moteur factice détecté dans src/ et backend/app/."
+  echo "✓ Aucun appel réseau externe ni moteur factice détecté dans src/, backend/app/ et scripts/ (hors scripts/download_openmed_model.py, étape d'installation)."
 fi
 exit "$STATUS"

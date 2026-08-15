@@ -234,6 +234,11 @@ def find_pii(text: str, *, redact_doctors: bool = True) -> list[Finding]:
     seen: set[tuple[str, str]] = set()
 
     def add(pii_type: str, value: str, confidence: float) -> None:
+        # Un fragment contenant déjà un jeton d'anonymisation (« [ADRESSE] ») est
+        # du texte DÉJÀ masqué : le re-détecter casserait l'idempotence de la
+        # revalidation (le texte serait « modifié » sans nouvelle fuite).
+        if "[" in value or "]" in value:
+            return
         value = _clean_value(value)
         if not value:
             return

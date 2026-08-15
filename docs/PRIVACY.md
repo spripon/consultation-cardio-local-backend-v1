@@ -56,3 +56,18 @@ La politique `strict_no_leak` retire en plus l'âge, le sexe et les dates.
   (`internal: true`) : aucun appel externe n'est possible, même par erreur.
 - **Documents refusés plutôt que tronqués.** Un PDF dépassant la limite de pages
   est rejeté (413) pour éviter tout compte rendu partiel non signalé.
+
+## Revalidation systématique de /categorize
+
+`/api/v1/categorize` ne fait plus confiance au texte reçu : il le repasse par le
+pipeline complet `anonymize()` (règles déterministes + modèle PII local OpenMed,
+obligatoire en production) avant toute catégorisation.
+
+- modèle requis mais indisponible → **503**, jamais de repli externe ;
+- texte modifié par la revalidation ou jugé non sûr → **422**, aucune
+  catégorisation ;
+- texte inchangé et sûr → catégorisation déterministe.
+
+Cela duplique potentiellement une inférence déjà réalisée par le parcours UI
+(anonymisation puis catégorisation). Ce coût CPU est assumé : un appelant direct
+de l'API ne doit pas pouvoir contourner la couche modèle.

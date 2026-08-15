@@ -2,14 +2,15 @@
 consultation.cardiologie-tarbes.org {
 	encode zstd gzip
 
-	# Contrôle d'accès obligatoire dès que l'instance est joignable depuis
-	# Internet. Copier deploy/caddy-auth/basic-auth.conf.example vers
-	# deploy/caddy-auth/basic-auth.conf (jamais committé, cf. .gitignore) :
-	#   basic_auth * { {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH} }
-	# Le hachage est généré avec `docker run --rm caddy:2.8-alpine caddy hash-password`
-	# et fourni par variables d'environnement, jamais en dur dans Git.
-	# Le glob tolère l'absence de fichier (déploiement LAN / Tailscale only).
-	import /etc/caddy/auth/*.conf
+	# Contrôle d'accès OBLIGATOIRE (fail-closed) : aucune configuration
+	# optionnelle, aucun glob tolérant l'absence de fichier. Les identifiants
+	# proviennent de deploy/caddy.env (env_file obligatoire dans compose) et ne
+	# sont JAMAIS committés. Générer le hash :
+	#   docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<motdepasse>'
+	# Le mot de passe en clair ne doit jamais figurer dans Git ni dans caddy.env.
+	basic_auth * {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

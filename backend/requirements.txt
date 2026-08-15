@@ -17,5 +17,6 @@ pytest==8.3.4
 # Le runtime HF est inclus via l'extra [hf] ; les poids sont téléchargés au
 # préalable sur l'hôte (scripts/download_openmed_model.py) puis montés en /models.
 openmed[hf]==2.0.0
-# Transcription locale optionnelle (ENABLE_SPEECH=true)
-# faster-whisper==1.1.1
+# Transcription locale (ENABLE_SPEECH=true) : modèle strictement local,
+# CPU/int8, local_files_only=True. Aucun service cloud.
+faster-whisper==1.1.1

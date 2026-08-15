@@ -209,15 +209,30 @@ docker compose exec api python -c "import socket;socket.create_connection(('1.1.
 # doit échouer (Network is unreachable)
 ```
 
-### Contrôle d'accès (obligatoire si exposé sur Internet)
+### Contrôle d'accès — OBLIGATOIRE (fail-closed)
+Le Caddyfile de production déclare `basic_auth` **inconditionnellement** ; les
+identifiants viennent de `deploy/caddy.env`, déclaré en `env_file` du service
+`web`. Si ce fichier est absent, `docker compose up` **échoue** : il est
+impossible de publier le site sans authentification.
+
 ```bash
+# 1) Générer le hash (le mot de passe en clair ne doit JAMAIS être committé
+#    ni stocké dans caddy.env)
 docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<mot-de-passe>'
-cp deploy/caddy-auth/basic-auth.conf.example deploy/caddy-auth/basic-auth.conf
-export BASIC_AUTH_USER=cardiologue BASIC_AUTH_HASH='$2a$14$...'
-docker compose up -d web
+
+# 2) Créer le fichier d'environnement (ignoré par Git)
+cp deploy/caddy.env.example deploy/caddy.env
+$EDITOR deploy/caddy.env   # BASIC_AUTH_USER + BASIC_AUTH_HASH
+
+# 3) Démarrer
+docker compose -f deploy/docker-compose.yml up -d
 ```
-Les fichiers `deploy/caddy-auth/*.conf` sont ignorés par Git. Sans fichier, Caddy
-démarre sans authentification : réservé à un déploiement LAN ou Tailscale.
+
+`deploy/caddy.env` est dans `.gitignore` ; seul `deploy/caddy.env.example`
+(valeurs factices) est committé. L'ancien mécanisme optionnel
+`deploy/caddy-auth/*.conf` a été supprimé : un glob vide était accepté par Caddy
+et laissait démarrer un site public sans authentification. Une variante
+LAN/Tailscale sans auth devra être un fichier de configuration distinct.
 
 ### Limites de documents
 Un PDF de plus de `MAX_PDF_PAGES` pages est **refusé** (HTTP 413) : jamais de

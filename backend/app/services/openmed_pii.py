@@ -130,7 +130,37 @@ def _load_engine():
             "modèle PII local absent : exécutez scripts/download_openmed_model.py avant utilisation"
         )
 
+    # Warm-up SYNTHÉTIQUE (aucune donnée patient, jamais journalisé) exécuté une
+    # seule fois : il valide réellement le chargement des poids/tokenizer et la
+    # compatibilité de l'API avec les paramètres exacts du runtime. Le mode
+    # hors-ligne est déjà forcé ci-dessus : aucun téléchargement possible.
+    _warmup(openmed)
     return openmed
+
+
+#: Chaîne fictive française, sans aucune donnée patient réelle.
+WARMUP_TEXT = "Le patient X a consulté le service de cardiologie."
+
+
+def _warmup(openmed) -> None:
+    if not hasattr(openmed, "extract_pii"):
+        raise OpenMedUnavailable("API openmed inattendue : `extract_pii` introuvable")
+    try:
+        result = openmed.extract_pii(  # type: ignore[attr-defined]
+            WARMUP_TEXT,
+            model_name=settings.openmed_pii_model,
+            lang=settings.openmed_language,
+            confidence_threshold=settings.openmed_confidence_threshold,
+            use_smart_merging=True,
+        )
+    except Exception as exc:  # pragma: no cover - dépend des poids locaux
+        raise OpenMedUnavailable(
+            f"chargement du modèle PII local impossible ({exc.__class__.__name__})"
+        ) from exc
+
+    entities = result.get("entities") if isinstance(result, dict) else getattr(result, "entities", None)
+    if entities is None:
+        raise OpenMedUnavailable("réponse OpenMed inattendue au warm-up : `entities` absent")
 
 
 def get_engine():

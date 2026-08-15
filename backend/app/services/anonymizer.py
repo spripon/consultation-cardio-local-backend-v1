@@ -20,7 +20,9 @@ class AnonymizationResult:
     residues: list[Finding] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     confidence: float = 0.0
-    safe_to_inject: bool = True
+    #: Défaut volontairement restrictif : aucune structure intermédiaire ne doit
+    #: autoriser l'injection par défaut.
+    safe_to_inject: bool = False
 
     @property
     def has_critical_warning(self) -> bool:
