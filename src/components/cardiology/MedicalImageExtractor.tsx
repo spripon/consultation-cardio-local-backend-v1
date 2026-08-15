@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ImageUpload } from '@/components/ui/image-upload';
+import { LocalProcessingNotice } from '@/components/LocalProcessingNotice';
 import { useLocalExtraction, type ExtractionResult } from '@/hooks/useLocalExtraction';
 import { CardiologyFormData } from './types';
 import { toast } from 'sonner';
@@ -117,6 +118,8 @@ export const MedicalImageExtractor = ({
           sort de l'établissement. L'anonymisation automatique n'est jamais garantie — votre
           relecture est obligatoire avant insertion.
         </p>
+
+        <LocalProcessingNotice />
 
         <ImageUpload
           onImageSelect={handleFileSelect}
