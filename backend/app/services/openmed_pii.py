@@ -162,12 +162,25 @@ def _normalise_entities(raw_entities) -> list[Finding]:
         if isinstance(entity, dict):
             label = str(entity.get("entity_group") or entity.get("label") or entity.get("type") or "ID")
             value = str(entity.get("word") or entity.get("text") or entity.get("value") or "")
-            score = float(entity.get("score") or entity.get("confidence") or 0.8)
+            score = float(entity.get("confidence") or entity.get("score") or 0.8)
         else:  # objets typés côté openmed
-            label = str(getattr(entity, "label", getattr(entity, "type", "ID")))
-            value = str(getattr(entity, "text", getattr(entity, "value", "")))
-            score = float(getattr(entity, "score", 0.8) or 0.8)
+            label = str(
+                getattr(entity, "label", None)
+                or getattr(entity, "entity_group", None)
+                or getattr(entity, "type", None)
+                or "ID"
+            )
+            value = str(
+                getattr(entity, "text", None)
+                or getattr(entity, "word", None)
+                or getattr(entity, "value", None)
+                or ""
+            )
+            score = float(
+                getattr(entity, "confidence", None) or getattr(entity, "score", None) or 0.8
+            )
         key = label.upper().replace("B-", "").replace("I-", "").replace(" ", "_")
+        # Un label inconnu n'est JAMAIS ignoré : il est rédigé de façon conservatrice.
         pii_type = LABEL_MAP.get(key, "ID")
         value = value.strip()
         if value:
@@ -178,19 +191,22 @@ def _normalise_entities(raw_entities) -> list[Finding]:
 def detect_pii(text: str) -> list[Finding]:
     """Détection PII par modèle local. Lève OpenMedUnavailable si absent."""
     openmed = get_engine()
-    policy = settings.openmed_policy
-    model = settings.openmed_pii_model
 
-    # L'API OpenMed 2.0 expose `deidentify` et/ou `extract_pii` selon la version.
+    # API officielle OpenMed 2.0.
     if hasattr(openmed, "extract_pii"):
-        raw = openmed.extract_pii(text, model=model, policy=policy)  # type: ignore[attr-defined]
-        entities = raw.get("entities") if isinstance(raw, dict) else raw
+        result = openmed.extract_pii(  # type: ignore[attr-defined]
+            text,
+            model_name=settings.openmed_pii_model,
+            lang=settings.openmed_language,
+            confidence_threshold=settings.openmed_confidence_threshold,
+            use_smart_merging=True,
+        )
+        if isinstance(result, dict):
+            entities = result.get("entities")
+        else:
+            entities = getattr(result, "entities", None)
+        if entities is None:
+            raise OpenMedUnavailable("réponse OpenMed inattendue : `entities` absent")
         return _normalise_entities(entities)
 
-    if hasattr(openmed, "deidentify"):
-        raw = openmed.deidentify(text, model=model, policy=policy)  # type: ignore[attr-defined]
-        if isinstance(raw, dict):
-            return _normalise_entities(raw.get("entities"))
-        return _normalise_entities(getattr(raw, "entities", []))
-
-    raise OpenMedUnavailable("API openmed inattendue : ni extract_pii ni deidentify")
+    raise OpenMedUnavailable("API openmed inattendue : `extract_pii` introuvable")

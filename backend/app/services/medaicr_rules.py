@@ -1,4 +1,9 @@
-"""Couche déterministe d'identification des données personnelles (inspirée MedAiCR).
+"""Règles déterministes inspirées de MedAiCR (« MedAiCR-derived deterministic rules »).
+
+Ce module N'EST PAS le paquet MedAiCR complet (qui comporte notamment la
+rédaction PDF par zones, un watcher de dossiers et un LLM optionnel) : il en
+reprend uniquement la couche déterministe de détection d'identifiants, adaptée
+à la cardiologie. Aucun LLM MedAiCR externe n'est activé dans cette variante.
 
 Principes reproduits :
   * extraction par étiquettes (« Nom : », « IPP : », « Né le ») ;
@@ -30,8 +35,22 @@ TOKENS: dict[str, str] = {
     "ID": "[ID]",
 }
 
-#: Types dont un résidu constitue une fuite à haut risque.
-HIGH_RISK_TYPES = {"NIR", "EMAIL", "PHONE", "DOB", "IPP", "ID"}
+#: Types dont un résidu constitue une fuite à haut risque (identifiants directs).
+HIGH_RISK_TYPES = {
+    "NIR",
+    "EMAIL",
+    "PHONE",
+    "DOB",
+    "IPP",
+    "ID",
+    "NAME",
+    "FIRSTNAME",
+    "ADDRESS",
+    "DOCTOR",
+}
+
+#: Types soumis au filtre de plausibilité onomastique lors du balayage final.
+_NAME_LIKE_TYPES = {"NAME", "FIRSTNAME", "DOCTOR"}
 
 _NAME_CHARS = r"A-Za-zÀ-ÖØ-öø-ÿ'’\-"
 
@@ -270,6 +289,10 @@ def safety_sweep(text: str) -> list[Finding]:
             continue
         for match in pattern.finditer(text):
             value = _clean_value(match.group(0))
+            if not value or value.startswith("["):
+                continue
+            if pii_type in _NAME_LIKE_TYPES and not _is_plausible_name(value):
+                continue
             key = (pii_type, value.lower())
             if key in seen:
                 continue
@@ -281,6 +304,8 @@ def safety_sweep(text: str) -> list[Finding]:
         for match in pattern.finditer(text):
             value = _clean_value(match.group(1))
             if not value or value.startswith("["):
+                continue
+            if pii_type in _NAME_LIKE_TYPES and not _is_plausible_name(value):
                 continue
             key = (pii_type, value.lower())
             if key in seen:

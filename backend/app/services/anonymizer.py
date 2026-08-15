@@ -40,7 +40,7 @@ def _union(deterministic: list[Finding], model: list[Finding]) -> list[Finding]:
 
 def anonymize(text: str, *, require_openmed: bool | None = None) -> AnonymizationResult:
     """Anonymise un texte. Ne journalise jamais le contenu."""
-    require = settings.require_openmed if require_openmed is None else require_openmed
+    require = settings.openmed_required if require_openmed is None else require_openmed
     warnings: list[str] = []
 
     deterministic = rules.find_pii(text, redact_doctors=settings.redact_doctor_names)
