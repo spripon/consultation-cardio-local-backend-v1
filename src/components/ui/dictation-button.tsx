@@ -8,11 +8,13 @@ interface DictationButtonProps {
 }
 
 export const DictationButton = ({ onTranscript, size = "sm" }: DictationButtonProps) => {
-  const { isListening, isProcessing, startListening, stopListening } = useSpeechToText({
-    onTranscript,
-  });
+  const { isListening, isProcessing, isUnavailable, startListening, stopListening } =
+    useSpeechToText({
+      onTranscript,
+    });
 
   const handleClick = () => {
+    if (isUnavailable) return;
     if (isListening) {
       stopListening();
     } else {
@@ -26,7 +28,12 @@ export const DictationButton = ({ onTranscript, size = "sm" }: DictationButtonPr
       variant={isListening ? "destructive" : "outline"}
       size={size}
       onClick={handleClick}
-      disabled={isProcessing}
+      disabled={isProcessing || isUnavailable}
+      title={
+        isUnavailable
+          ? "Dictée locale non activée sur ce serveur"
+          : "Dictée transcrite localement — aucune donnée envoyée vers un service IA externe"
+      }
       className="flex items-center gap-2"
     >
       {isProcessing ? (
@@ -36,7 +43,7 @@ export const DictationButton = ({ onTranscript, size = "sm" }: DictationButtonPr
       ) : (
         <Mic className="h-4 w-4" />
       )}
-      {isListening ? "Arrêter" : "Dicter"}
+      {isUnavailable ? "Dictée indisponible" : isListening ? "Arrêter" : "Dicter"}
     </Button>
   );
 };

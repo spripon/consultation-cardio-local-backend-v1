@@ -19,7 +19,10 @@ PATTERNS=(
 
 STATUS=0
 for pattern in "${PATTERNS[@]}"; do
-  if matches=$(grep -rniE "$pattern" src backend/app 2>/dev/null); then
+  # src/lib/legacyCleanup.ts est exclu : il ne contient qu'une liste de clés
+  # d'API héritées à SUPPRIMER du navigateur, aucun appel réseau.
+  if matches=$(grep -rniE "$pattern" src backend/app 2>/dev/null \
+      | grep -v '^src/lib/legacyCleanup\.ts:'); then
     echo "✗ Référence cloud interdite trouvée pour /$pattern/ :"
     echo "$matches"
     STATUS=1

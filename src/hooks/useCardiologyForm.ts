@@ -99,13 +99,6 @@ export const useCardiologyForm = () => {
     });
   };
 
-  // Legacy cleanup: remove any previously stored OpenAI key from localStorage
-  try {
-    localStorage.removeItem("openai-api-key");
-  } catch {
-    // ignore
-  }
-
   return {
     formData,
     handleChange,
