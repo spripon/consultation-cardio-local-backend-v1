@@ -16,12 +16,15 @@ VERSION = "1.0.0-local"
 def _snapshot() -> HealthResponse:
     ocr_ok = tesseract_available()
     openmed_ok = openmed_status().available
+    speech_ok = speech_available()
 
     missing: list[str] = []
     if settings.ocr_required and not ocr_ok:
         missing.append("ocr")
     if settings.openmed_required and not openmed_ok:
         missing.append("openmed")
+    if settings.enable_speech and not speech_ok:
+        missing.append("speech")
 
     ready = not missing
     return HealthResponse(
@@ -29,7 +32,7 @@ def _snapshot() -> HealthResponse:
         version=VERSION,
         ocr=ocr_ok,
         openmed=openmed_ok,
-        speech=speech_available(),
+        speech=speech_ok,
         policy=settings.openmed_policy,
         environment="production" if settings.is_production else "development",
         ready=ready,
