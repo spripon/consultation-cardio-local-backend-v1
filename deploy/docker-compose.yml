@@ -23,6 +23,9 @@ services:
       - cardio
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
     deploy:
       resources:
         limits:
@@ -44,6 +47,8 @@ services:
       - caddy_config:/config
     networks:
       - cardio
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   cardio:

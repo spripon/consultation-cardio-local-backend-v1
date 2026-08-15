@@ -8,6 +8,11 @@ consultation.cardiologie-tarbes.org {
 		X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
 		Permissions-Policy "microphone=(self), camera=(self), geolocation=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		# CSP compatible avec le bundle Vite (styles injectés) et strictement même origine :
+		# aucune connexion sortante vers un service tiers n'est autorisée par le navigateur.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 
