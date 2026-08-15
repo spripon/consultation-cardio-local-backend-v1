@@ -34,12 +34,22 @@ export const MedicalImageExtractor = ({
   const [pending, setPending] = useState<ExtractionResult | null>(null);
   const [reviewText, setReviewText] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const { extractMedicalText, isExtracting, error } = useLocalExtraction();
+  const [isValidating, setIsValidating] = useState(false);
+  /** Résultat de la dernière revalidation serveur du texte réellement affiché. */
+  const [lastCheckSafe, setLastCheckSafe] = useState<boolean | null>(null);
+  const [reviewWarnings, setReviewWarnings] = useState<string[]>([]);
+  const [proposedFields, setProposedFields] = useState<ExtractionResult['fields']>({});
+  const { extractMedicalText, revalidateText, categorizeText, isExtracting, error } =
+    useLocalExtraction();
 
   const resetReview = () => {
     setPending(null);
     setReviewText('');
     setConfirmed(false);
+    setIsValidating(false);
+    setLastCheckSafe(null);
+    setReviewWarnings([]);
+    setProposedFields({});
   };
 
   const handleFileSelect = (file: File) => {
@@ -65,6 +75,9 @@ export const MedicalImageExtractor = ({
       setPending(result);
       setReviewText(result.rawTextAnonymized);
       setConfirmed(false);
+      setLastCheckSafe(result.safeToInject);
+      setReviewWarnings(result.warnings);
+      setProposedFields(result.fields ?? {});
 
       result.warnings.forEach((warning) => toast.warning(warning));
       if (result.safeToInject) {
@@ -78,27 +91,75 @@ export const MedicalImageExtractor = ({
     }
   };
 
-  const handleConfirmInjection = () => {
-    if (!pending || !confirmed) return;
+  /**
+   * Validation : le texte RÉELLEMENT affiché (et éventuellement corrigé par le
+   * médecin) est repassé côté serveur dans le pipeline d'anonymisation, puis
+   * catégorisé. Seules les rubriques recalculées à partir de ce texte validé
+   * sont injectées.
+   */
+  const handleConfirmInjection = async () => {
+    if (!confirmed || isValidating) return;
 
-    const entries = Object.entries(pending.fields).filter(
-      ([, value]) => typeof value === 'string' && value.trim(),
-    );
-
-    if (entries.length === 0) {
-      toast.warning('Aucune rubrique catégorisée : recopiez manuellement le texte relu.');
+    const submitted = reviewText;
+    if (!submitted.trim()) {
+      toast.error('Le texte à valider est vide.');
       return;
     }
 
-    entries.forEach(([name, value]) => {
-      onChange({
-        target: { name, value: value as string },
-      } as React.ChangeEvent<HTMLTextAreaElement>);
-    });
+    setIsValidating(true);
+    try {
+      // 1) Revalidation locale : règles déterministes + OpenMed + safety sweep.
+      const check = await revalidateText(submitted);
+      setReviewWarnings(check.warnings);
 
-    toast.success(`${entries.length} rubrique(s) insérée(s) après validation.`);
-    resetReview();
-    setSelectedFile(null);
+      const changed = check.textAnonymized !== submitted;
+      if (changed || !check.safeToInject) {
+        // De nouvelles données identifiantes ont été masquées ou subsistent :
+        // on remet le texte à jour et on exige une nouvelle relecture.
+        setReviewText(check.textAnonymized);
+        setConfirmed(false);
+        setLastCheckSafe(check.safeToInject);
+        setProposedFields({});
+        toast.error(
+          changed
+            ? 'De nouvelles données identifiantes ont été masquées : relisez le texte mis à jour puis validez à nouveau.'
+            : 'Identifiant résiduel détecté : corrigez le texte, puis validez à nouveau.',
+        );
+        return;
+      }
+
+      setLastCheckSafe(true);
+
+      // 2) Catégorisation du texte effectivement validé.
+      const categorized = await categorizeText(check.textAnonymized);
+      categorized.warnings.forEach((warning) => toast.warning(warning));
+      setProposedFields(categorized.fields ?? {});
+
+      const entries = Object.entries(categorized.fields ?? {}).filter(
+        ([, value]) => typeof value === 'string' && value.trim(),
+      );
+
+      if (entries.length === 0) {
+        toast.warning('Aucune rubrique catégorisée : recopiez manuellement le texte relu.');
+        return;
+      }
+
+      entries.forEach(([name, value]) => {
+        onChange({
+          target: { name, value: value as string },
+        } as React.ChangeEvent<HTMLTextAreaElement>);
+      });
+
+      toast.success(`${entries.length} rubrique(s) insérée(s) après revalidation locale.`);
+      resetReview();
+      setSelectedFile(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Revalidation impossible';
+      toast.error(`Validation refusée : ${message}`);
+      setConfirmed(false);
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   const percent = (value?: number) => `${Math.round((value ?? 0) * 100)} %`;
@@ -173,19 +234,19 @@ export const MedicalImageExtractor = ({
               )}
             </div>
 
-            {!pending.safeToInject && (
+            {lastCheckSafe === false && (
               <div className="flex items-start gap-2 rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  Des données potentiellement identifiantes subsistent. Corrigez-les ci-dessous
-                  avant toute insertion.
+                  Des données potentiellement identifiantes subsistent. Corrigez-les ci-dessous :
+                  après correction, la validation relancera un contrôle local complet.
                 </span>
               </div>
             )}
 
-            {pending.warnings.length > 0 && (
+            {reviewWarnings.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                {pending.warnings.map((warning, index) => (
+                {reviewWarnings.map((warning, index) => (
                   <li key={`${index}-${warning}`}>{warning}</li>
                 ))}
               </ul>
@@ -198,22 +259,30 @@ export const MedicalImageExtractor = ({
               <Textarea
                 id="anonymized-review"
                 value={reviewText}
-                onChange={(event) => setReviewText(event.target.value)}
+                onChange={(event) => {
+                  setReviewText(event.target.value);
+                  setConfirmed(false);
+                }}
                 rows={10}
                 className="font-mono text-xs"
               />
+              <p className="text-xs text-muted-foreground">
+                À la validation, ce texte est repassé sur le serveur (règles déterministes +
+                modèle PII local + balayage de sécurité) et les rubriques sont recalculées à
+                partir de la version que vous avez validée.
+              </p>
             </div>
 
             <div className="space-y-1 text-sm">
               <p className="font-medium text-foreground">Rubriques proposées</p>
-              {Object.entries(pending.fields).filter(([, v]) => (v as string)?.trim()).length ===
+              {Object.entries(proposedFields).filter(([, v]) => (v as string)?.trim()).length ===
               0 ? (
                 <p className="text-muted-foreground">
                   Aucune rubrique détectée automatiquement.
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(pending.fields)
+                  {Object.entries(proposedFields)
                     .filter(([, value]) => (value as string)?.trim())
                     .map(([name]) => (
                       <Badge key={name} variant="outline">
@@ -240,11 +309,20 @@ export const MedicalImageExtractor = ({
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 onClick={handleConfirmInjection}
-                disabled={!confirmed || !pending.safeToInject}
+                disabled={!confirmed || isValidating}
                 className="flex-1"
               >
-                <Check className="mr-2 h-4 w-4" />
-                Valider et insérer dans le formulaire
+                {isValidating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Revalidation locale...
+                  </>
+                ) : (
+                  <>
+                    <Check className="mr-2 h-4 w-4" />
+                    Revalider et insérer dans le formulaire
+                  </>
+                )}
               </Button>
               <Button variant="outline" onClick={resetReview} className="flex-1">
                 <X className="mr-2 h-4 w-4" />
