@@ -65,6 +65,6 @@ if mocks=$(grep -rniE "mock|fake" backend/app 2>/dev/null); then
 fi
 
 if [ "$STATUS" -eq 0 ]; then
-  echo "✓ Aucun appel réseau externe ni moteur factice détecté dans src/ et backend/app/."
+  echo "✓ Aucun appel réseau externe ni moteur factice détecté dans src/, backend/app/ et scripts/ (hors scripts/download_openmed_model.py, étape d'installation)."
 fi
 exit "$STATUS"
