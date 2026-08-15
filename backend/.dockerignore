@@ -1,0 +1,21 @@
+# Contexte de build de l'image API (context: ../backend).
+# Le .dockerignore racine ne s'applique PAS à ce contexte.
+# Ne PAS exclure : app/, requirements.txt, Dockerfile.
+.env
+.env.*
+.git
+.gitignore
+tests
+.pytest_cache
+.mypy_cache
+__pycache__
+*.py[cod]
+.venv
+.venv*
+venv
+*.log
+logs
+backups
+*.bak
+*.orig
+.DS_Store

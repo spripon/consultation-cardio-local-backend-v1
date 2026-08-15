@@ -13,8 +13,6 @@ dist-ssr
 # Secrets et données locales — JAMAIS dans une image
 .env
 .env.*
-!.env.development
-!.env.production
 backend/.env
 deploy/caddy.env
 deploy/models
