@@ -240,7 +240,7 @@ export const MedicalImageExtractor = ({
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 onClick={handleConfirmInjection}
-                disabled={!confirmed}
+                disabled={!confirmed || !pending.safeToInject}
                 className="flex-1"
               >
                 <Check className="mr-2 h-4 w-4" />
@@ -248,7 +248,7 @@ export const MedicalImageExtractor = ({
               </Button>
               <Button variant="outline" onClick={resetReview} className="flex-1">
                 <X className="mr-2 h-4 w-4" />
-                Rejeter l'extraction
+                Annuler / rejeter l'extraction
               </Button>
             </div>
           </div>
