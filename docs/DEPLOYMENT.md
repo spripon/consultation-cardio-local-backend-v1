@@ -19,13 +19,13 @@ Internet. Le conteneur applicatif tourne ensuite hors ligne (`HF_HUB_OFFLINE=1`)
 
 ```bash
 pip install huggingface_hub
-python scripts/download_models.py --out deploy/models
+python scripts/download_openmed_model.py --out deploy/models
 ```
 
 Si vous n'utilisez ni la détection PII par modèle ni la dictée :
 
 ```bash
-python scripts/download_models.py --skip-pii --skip-whisper
+python scripts/download_openmed_model.py --skip-pii --skip-whisper
 ```
 
 ## 3. Configuration
