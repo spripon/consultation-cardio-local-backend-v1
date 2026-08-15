@@ -61,7 +61,7 @@ if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
     ok "Docker Compose v2 : $(docker compose version | head -1)"
   else
-    fail "Docker Compose v2 absent (plugin docker-compose-plugin requis)"
+    fail "Docker Compose v2 absent : `docker compose version` doit fonctionner (paquet docker-compose-v2 sur Ubuntu, ou docker-compose-plugin depuis le dépôt Docker officiel) — voir deploy/install-host-deps.sh"
   fi
   if docker info >/dev/null 2>&1; then
     ok "Daemon Docker joignable par l'utilisateur courant"
@@ -71,6 +71,12 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 # --- Ports 80/443 (aucun processus n'est arrêté) ---
+# Un port occupé par le conteneur attendu `cardio-web` déjà démarré n'est PAS
+# une erreur : `make up` reste idempotent sur une pile en cours d'exécution.
+web_container_running() {
+  command -v docker >/dev/null 2>&1 || return 1
+  [ "$(docker ps --filter 'name=^/cardio-web$' --filter 'status=running' --format '{{.Names}}' 2>/dev/null)" = "cardio-web" ]
+}
 port_busy() {
   if command -v ss >/dev/null 2>&1; then
     ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
@@ -80,10 +86,18 @@ port_busy() {
     return 2
   fi
 }
+WEB_RUNNING=0
+web_container_running && WEB_RUNNING=1
 for p in 80 443; do
   set +e; port_busy "$p"; rc=$?; set -e
   case "$rc" in
-    0) fail "Port $p déjà occupé : libérer manuellement (aucun processus n'est arrêté par ce script)" ;;
+    0)
+      if [ "$WEB_RUNNING" -eq 1 ]; then
+        echo "i Port $p occupé par le conteneur attendu cardio-web (déjà démarré) : OK"
+      else
+        fail "Port $p occupé par un autre service : libérer manuellement (aucun processus n'est arrêté par ce script)"
+      fi
+      ;;
     1) ok "Port $p libre" ;;
     *) warn "Port $p non vérifiable (ni ss ni netstat)" ;;
   esac
@@ -133,12 +147,10 @@ else
   ok "ENABLE_SPEECH=false : modèle Whisper non requis"
 fi
 
-# --- Frontend statique servi par Caddy ---
-if [ -d dist ] && [ -f dist/index.html ]; then
-  ok "Frontend construit : dist/index.html"
-else
-  fail "dist/ absent — exécuter : npm ci && npm run build"
-fi
+# --- Frontend statique ---
+# Le frontend est compilé DANS l'image web (deploy/Dockerfile.web) : aucun
+# Node/npm ni dist/ n'est requis sur l'hôte.
+ok "Frontend construit dans l'image Docker web (aucun dist/ hôte requis)"
 
 echo
 if [ "$STATUS" -eq 0 ]; then

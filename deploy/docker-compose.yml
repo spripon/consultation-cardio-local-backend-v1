@@ -38,7 +38,12 @@ services:
           memory: 4g
 
   web:
-    image: caddy:2.8-alpine
+    # Image construite depuis la racine du dépôt : le frontend est compilé dans
+    # l'étape builder (node:22-alpine), donc AUCUN Node/npm n'est requis sur
+    # l'hôte Ubuntu et aucun dist/ hôte n'est nécessaire.
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
     container_name: cardio-web
     restart: unless-stopped
     depends_on:
@@ -51,8 +56,7 @@ services:
     env_file:
       - ./caddy.env
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../dist:/srv/www:ro
+      # Caddyfile et frontend statique sont dans l'image (deploy/Dockerfile.web).
       - caddy_data:/data
       - caddy_config:/config
     networks:

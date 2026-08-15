@@ -11,9 +11,9 @@ help:
 	@echo "  make prepare-config  Crée backend/.env et deploy/caddy.env (jamais écrasés)"
 	@echo "  make models          Télécharge le modèle PII local (phase installation)"
 	@echo "  make models-speech   Idem + modèle faster-whisper small"
-	@echo "  make build           Construit le frontend (dist/) et l'image API"
+	@echo "  make build           Construit les images Docker (web + api), sans npm hôte"
 	@echo "  make preflight       Vérifications lecture seule avant démarrage"
-	@echo "  make validate        no-egress + compose config + build API (sans démarrage)"
+	@echo "  make validate        no-egress + compose config + build images (sans démarrage)"
 	@echo "  make up              preflight puis docker compose up -d"
 	@echo "  make down            Arrête la pile (volumes conservés)"
 	@echo "  make logs-api        Journaux de l'API (sans contenu patient)"
@@ -28,8 +28,7 @@ models-speech:
 	bash $(ROOT)/deploy/download-models.sh --with-speech
 
 build:
-	cd $(ROOT) && npm ci && npm run build
-	$(COMPOSE) build api
+	$(COMPOSE) build
 
 preflight:
 	bash $(ROOT)/deploy/preflight-ubuntu.sh

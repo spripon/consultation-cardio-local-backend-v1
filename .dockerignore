@@ -1,0 +1,42 @@
+# Contexte de build minimal : aucun secret, aucun modèle, aucun artefact local
+# ne doit être envoyé au daemon Docker.
+.git
+.gitignore
+.github
+
+# Dépendances / artefacts de build (reconstruits dans l'image)
+node_modules
+dist
+dist-ssr
+*.tsbuildinfo
+
+# Secrets et données locales — JAMAIS dans une image
+.env
+.env.*
+!.env.development
+!.env.production
+backend/.env
+deploy/caddy.env
+deploy/models
+deploy/.venv-models
+
+# Python local
+.venv
+.venv*
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+
+# Sauvegardes, journaux, divers
+*.bak
+*.orig
+*.log
+logs
+deploy/logs
+backups
+.DS_Store
+.vscode
+.idea
+.lovable
