@@ -1,239 +1,179 @@
-# Installation sur Ubuntu — commandes exactes
+# Installation reproductible sur Ubuntu (CPU-only, 100 % local)
 
-Cible : serveur Ubuntu 22.04 / 24.04, domaine `consultation.cardiologie-tarbes.org`.
-Traitement 100 % local, aucune base de données, aucun service cloud.
+Guide pas-à-pas pour héberger l'application sur un serveur Ubuntu que vous
+contrôlez. **Aucune donnée patient ne sort du serveur** : OCR, anonymisation PII
+et catégorisation sont exécutées localement dans un conteneur sans accès Internet.
 
----
+> Avertissement : avant tout traitement de données patients réelles, une
+> validation DSI / DPO / établissement est **obligatoire** (analyse d'impact,
+> registre des traitements, hébergement). L'anonymisation automatique n'est pas
+> garantie : la relecture humaine reste obligatoire dans l'interface.
 
-## 1. Prérequis système
+Baseline auditée : voir [`docs/BASELINE.md`](../docs/BASELINE.md).
 
-```bash
-sudo apt update && sudo apt install -y ca-certificates curl git
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt update && sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker "$USER" && newgrp docker
+## 0. Prérequis matériels
 
-# Node.js 20 pour construire le frontend
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-```
+- Ubuntu 22.04 / 24.04 LTS, x86_64 ou aarch64, **CPU uniquement**
+- 8 Go de RAM recommandés (4 Go minimum), 15 Go de disque libre
+- Ports 80 et 443 libres, accessibles depuis Internet si domaine public
 
-## 2. Clone du dépôt
+## 1. Dépendances hôte (optionnel mais recommandé)
 
 ```bash
-sudo mkdir -p /opt/cardio && sudo chown "$USER":"$USER" /opt/cardio
-git clone <URL_DU_DEPOT> /opt/cardio/consultation
-cd /opt/cardio/consultation
+bash deploy/install-host-deps.sh        # demande confirmation avant apt-get
+sudo usermod -aG docker "$USER"          # puis rouvrir la session
 ```
 
-## 3. Configuration de l'environnement
+Le script installe `docker.io`, `docker-compose-plugin`, `git`, `curl`,
+`python3`, `tesseract-ocr(+fra,+eng)`, `ocrmypdf`. Il n'ajoute **aucune** règle
+de firewall, aucun tunnel, aucun `curl | sh`. Si vous préférez Docker CE du
+dépôt officiel Docker, ajoutez ce dépôt APT manuellement (clé GPG + source),
+puis passez cette étape.
+
+## 2. Cloner le dépôt
 
 ```bash
-cp backend/.env.example backend/.env
-nano backend/.env
+git clone https://github.com/spripon/consultation-cardio-local-backend-v1.git
+cd consultation-cardio-local-backend-v1
+git checkout main
 ```
 
-À régler impérativement :
+(Le nom `spripon/consultation-cardio-local-backend-v1` est un placeholder tant
+que le dépôt privé n'a pas été créé depuis Lovable.)
 
-```env
+## 3. Configuration locale
+
+```bash
+make -f deploy/Makefile prepare-config
+```
+
+Crée `backend/.env` et `deploy/caddy.env` depuis les exemples (jamais écrasés,
+`chmod 600`). Ces deux fichiers sont **obligatoires** et **jamais committés**.
+
+Puis éditez `backend/.env` :
+
+```
 APP_ENV=production
 CORS_ORIGINS=https://consultation.cardiologie-tarbes.org
-OPENMED_POLICY=gdpr_pseudonymization
-OPENMED_PII_MODEL=/models/openmed-pii
-REQUIRE_OPENMED=true          # fail-closed : 503 si le modèle local est absent
-ALLOW_RAW_OCR_DEBUG=false     # de toute façon ignoré en production
-ENABLE_SPEECH=false           # true seulement si vous déployez le modèle Whisper local
+REQUIRE_OPENMED=true
+ALLOW_RAW_OCR_DEBUG=false
+ENABLE_SPEECH=false          # true seulement si le modèle Whisper est installé
 ```
 
-## 4. Téléchargement initial du modèle OpenMed (sans aucune donnée patient)
+### Basic Auth (obligatoire, fail-closed)
 
-À faire **une seule fois**, avant la mise en service. C'est le seul moment où la
-machine a besoin d'un accès Internet.
+Générez un hash bcrypt **localement** :
 
 ```bash
-python3 -m venv /tmp/dlenv
-/tmp/dlenv/bin/pip install huggingface_hub
-/tmp/dlenv/bin/python scripts/download_openmed_model.py --out deploy/models
-
-# Sans dictée locale :
-# /tmp/dlenv/bin/python scripts/download_openmed_model.py --out deploy/models --skip-whisper
-
-ls deploy/models/openmed-pii
+docker run --rm -it caddy:2.8-alpine caddy hash-password
 ```
 
-Au runtime, le conteneur applique `HF_HUB_OFFLINE=1` et `TRANSFORMERS_OFFLINE=1` :
-aucun téléchargement ne peut se déclencher pendant une requête patient.
+Reportez la sortie dans `deploy/caddy.env` :
 
-## 5. Build du frontend
-
-```bash
-npm ci
-npm run build      # génère dist/, servi en statique par Caddy
+```
+BASIC_AUTH_USER=cardio
+BASIC_AUTH_HASH=$2a$14$...
 ```
 
-## 6. Tests synthétiques (données fictives uniquement)
+Le mot de passe en clair ne doit jamais être écrit dans un fichier du dépôt,
+committé, ni transmis par messagerie. Si `deploy/caddy.env` est absent,
+`docker compose up` **échoue** : le site public ne peut pas démarrer sans
+authentification.
+
+## 4. Télécharger les modèles (phase installation, avec réseau)
 
 ```bash
-python3 -m venv /tmp/testenv
-/tmp/testenv/bin/pip install -r backend/requirements.txt
-sudo apt install -y tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng
-cd backend && /tmp/testenv/bin/python -m pytest -q && cd ..
+make -f deploy/Makefile models          # modèle PII français OpenMed 2.0
+make -f deploy/Makefile models-speech   # + faster-whisper small (si dictée)
+```
 
-# Contrôle qu'aucun appel cloud ne subsiste dans le code
+Les poids vont dans `deploy/models/` (ignoré par Git) et sont montés en lecture
+seule sous `/models` dans le conteneur. Après cette étape, le runtime est de
+nouveau strictement hors ligne (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`) et
+aucun téléchargement n'est possible pendant un traitement.
+
+## 5. Construire
+
+```bash
+make -f deploy/Makefile build     # npm ci && npm run build, puis image API
+```
+
+## 6. Vérifier puis démarrer
+
+```bash
+make -f deploy/Makefile preflight   # lecture seule : rien n'est modifié
+make -f deploy/Makefile validate    # no-egress + compose config + build API
+make -f deploy/Makefile up          # dépend de preflight
+```
+
+`validate-install.sh --start` démarre puis interroge `/api/v1/health` et
+`/api/v1/readyz`. Un `401` sans identifiants est normal (Basic Auth) ; un `503`
+sur `readyz` signifie qu'un composant local requis manque — comportement
+fail-closed attendu.
+
+## 7. DNS pour `consultation.cardiologie-tarbes.org`
+
+- Enregistrement `A` → adresse IPv4 publique du serveur (et `AAAA` si IPv6).
+- Aucun proxy tiers : le trafic doit arriver **directement** sur Caddy, qui
+  obtient le certificat TLS via ACME/Let's Encrypt.
+- **Exigence « aucun contenu patient via un tiers » : n'utilisez pas Cloudflare
+  Tunnel, ni le proxy orange de Cloudflare, ni un reverse proxy externe.** Ces
+  services déchiffrent le trafic et verraient donc le contenu transmis. DNS
+  direct + Caddy uniquement.
+- Ports 80 (ACME) et 443 doivent être joignables depuis Internet.
+
+## 8. Vérification no-egress
+
+Depuis le dépôt :
+
+```bash
 bash scripts/verify_no_egress.sh
 ```
 
-## 7. Lancement de la pile
-
-Adaptez le domaine dans `deploy/Caddyfile` si nécessaire, puis :
-
-```bash
-cd deploy
-docker compose up -d --build
-docker compose ps
-```
-
-Le backend n'est **pas** publié sur l'hôte : il n'écoute que sur le réseau Docker
-interne, en `read_only`, `cap_drop: ALL`, `no-new-privileges`, avec `/tmp` en tmpfs.
-Seul Caddy expose 80/443.
-
-## 8. DNS et pare-feu
+Depuis le conteneur API (doit échouer : réseau Docker `internal: true`, donc
+aucune route de sortie) :
 
 ```bash
-# Enregistrement DNS A/AAAA à créer chez votre fournisseur :
-#   consultation.cardiologie-tarbes.org  ->  <IP publique du serveur>
-dig +short consultation.cardiologie-tarbes.org
+docker compose -f deploy/docker-compose.yml exec api python -c \
+  "import socket; socket.create_connection(('1.1.1.1', 443), timeout=5)"
+# attendu : OSError / timeout
 
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
+docker compose -f deploy/docker-compose.yml exec api python -c \
+  "import socket; print(socket.gethostbyname('example.com'))"
+# attendu : échec de résolution
 ```
 
-Caddy obtient et renouvelle le certificat TLS automatiquement une fois le DNS propagé.
+## 9. Sauvegarde et rollback
 
-## 9. Vérification de santé
+- Notez **le SHA GitHub déployé** : `git rev-parse HEAD` (à conserver hors
+  serveur, avec la date de mise en production).
+- Sauvegardez `backend/.env` et `deploy/caddy.env` hors dépôt, en coffre-fort.
+  `deploy/models/` peut être re-téléchargé, pas besoin de le sauvegarder.
+- Rollback :
 
 ```bash
-# Depuis le serveur, à travers Caddy
-curl -s https://consultation.cardiologie-tarbes.org/api/v1/health | tee /dev/stderr
-
-# Directement dans le réseau interne
-docker compose exec api python -c \
-  "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health').read().decode())"
+make -f deploy/Makefile down
+git checkout <sha-github-precedent>
+make -f deploy/Makefile build
+make -f deploy/Makefile up
 ```
 
-Réponse attendue : `status: ok` avec `ocr: true`, `openmed: true` (si le modèle est en
-place), `environment: production`.
+## 10. Mises à jour
 
-## 10. Journaux
+Jamais d'auto-update. Après revue et validation d'une nouvelle version :
 
 ```bash
-docker compose logs -f api
-docker compose logs -f web
-docker compose exec web tail -f /data/access.log
+git fetch origin && git log --oneline HEAD..origin/main   # revue
+git checkout main && git pull
+make -f deploy/Makefile build validate up
 ```
 
-Les journaux ne contiennent **aucun contenu patient** : seulement `request_id`,
-type MIME, taille et durée de traitement.
-
-## 11. Mise à jour
+## 11. Arrêt d'urgence
 
 ```bash
-cd /opt/cardio/consultation
-git rev-parse HEAD > /opt/cardio/last_good_commit   # note la version actuelle
-git pull
-npm ci && npm run build
-cd deploy && docker compose up -d --build
-curl -s https://consultation.cardiologie-tarbes.org/api/v1/health
+docker compose -f deploy/docker-compose.yml down
 ```
 
-## 12. Rollback
-
-```bash
-cd /opt/cardio/consultation
-git checkout "$(cat /opt/cardio/last_good_commit)"
-npm ci && npm run build
-cd deploy && docker compose up -d --build --force-recreate
-curl -s https://consultation.cardiologie-tarbes.org/api/v1/health
-
-# Arrêt complet si nécessaire
-docker compose down
-```
-
-Aucune migration de base de données n'est à annuler : l'application ne persiste
-aucune donnée. Un rollback se limite au code et à l'image du conteneur.
-
-## 13. Rappels de sécurité
-
-- L'anonymisation automatique n'est **jamais garantie** : l'interface impose une
-  relecture et une confirmation explicite du soignant avant d'insérer un texte.
-- Si un composant local requis manque, l'API renvoie une erreur 503 explicite.
-  Aucun service externe de secours n'est appelé.
-- Sauvegardez uniquement `backend/.env`, `deploy/Caddyfile` et `deploy/models/`.
-## Mise à jour d'audit (durcissement)
-
-### Modèle PII français
-```bash
-python scripts/download_openmed_model.py --out deploy/models
-# -> deploy/models/openmed-pii-fr  (OpenMed/OpenMed-PII-French-SuperClinical-Small-44M-v1)
-```
-Dans `backend/.env` :
-```
-OPENMED_PII_MODEL=/models/openmed-pii-fr
-OPENMED_LANGUAGE=fr
-REQUIRE_OPENMED=true        # obligatoire en production
-```
-Avec `APP_ENV=production`, OpenMed est requis **même si la variable est absente** :
-`/extract` et `/anonymize` renvoient 503 tant que le modèle local n'est pas monté.
-Aucun téléchargement n'a lieu pendant une requête (`HF_HUB_OFFLINE=1`,
-`TRANSFORMERS_OFFLINE=1`, `OPENMED_OFFLINE=1`).
-
-### Readiness
-```bash
-curl -fsS http://127.0.0.1:8000/api/v1/readyz   # 503 si OCR ou modèle PII manquant
-```
-`/readyz` sert aussi de HEALTHCHECK Docker : un conteneur non prêt est marqué
-`unhealthy` au lieu d'accepter des documents.
-
-### Isolation réseau
-Le service `api` n'est attaché qu'au réseau `backend_internal` (`internal: true`) :
-Docker ne lui crée **aucune route de sortie**. Seul Caddy est sur le réseau `edge`
-(ACME/HTTPS). Vérification :
-```bash
-docker compose exec api python -c "import socket;socket.create_connection(('1.1.1.1',443),3)"
-# doit échouer (Network is unreachable)
-```
-
-### Contrôle d'accès — OBLIGATOIRE (fail-closed)
-Le Caddyfile de production déclare `basic_auth` **inconditionnellement** ; les
-identifiants viennent de `deploy/caddy.env`, déclaré en `env_file` du service
-`web`. Si ce fichier est absent, `docker compose up` **échoue** : il est
-impossible de publier le site sans authentification.
-
-```bash
-# 1) Générer le hash (le mot de passe en clair ne doit JAMAIS être committé
-#    ni stocké dans caddy.env)
-docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<mot-de-passe>'
-
-# 2) Créer le fichier d'environnement (ignoré par Git)
-cp deploy/caddy.env.example deploy/caddy.env
-$EDITOR deploy/caddy.env   # BASIC_AUTH_USER + BASIC_AUTH_HASH
-
-# 3) Démarrer
-docker compose -f deploy/docker-compose.yml up -d
-```
-
-`deploy/caddy.env` est dans `.gitignore` ; seul `deploy/caddy.env.example`
-(valeurs factices) est committé. L'ancien mécanisme optionnel
-`deploy/caddy-auth/*.conf` a été supprimé : un glob vide était accepté par Caddy
-et laissait démarrer un site public sans authentification. Une variante
-LAN/Tailscale sans auth devra être un fichier de configuration distinct.
-
-### Limites de documents
-Un PDF de plus de `MAX_PDF_PAGES` pages est **refusé** (HTTP 413) : jamais de
-compte rendu tronqué en silence.
+Le service est immédiatement injoignable. Les fichiers temporaires OCR vivent en
+`tmpfs` et disparaissent à l'arrêt du conteneur ; les volumes Caddy (certificats)
+sont conservés.
