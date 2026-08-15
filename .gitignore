@@ -40,3 +40,5 @@ deploy/caddy.env
 *.orig
 backups/
 deploy/logs/
+
+deploy/.venv-models/
