@@ -1,0 +1,16 @@
+# Frontend construit DANS Docker : aucun Node/npm requis sur l'hôte Ubuntu.
+# Contexte de build attendu : racine du dépôt (voir deploy/docker-compose.yml).
+# Aucun secret n'entre dans l'image : .dockerignore exclut backend/.env,
+# deploy/caddy.env, deploy/models, etc. Les identifiants Basic Auth sont
+# injectés au RUNTIME par env_file (deploy/caddy.env).
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM caddy:2.8-alpine
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=builder /app/dist /srv/www
