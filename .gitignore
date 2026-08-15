@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python (backend local)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets et artefacts de deploiement
+backend/.env
+deploy/models/
+deploy/caddy-auth/*.conf
