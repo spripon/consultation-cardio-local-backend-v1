@@ -7,10 +7,9 @@ import { CardiologyFormData } from "./types";
 interface ExaminationSectionProps {
   formData: CardiologyFormData;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  apiKey?: string;
 }
 
-const ExaminationSection = ({ formData, onChange, apiKey }: ExaminationSectionProps) => {
+const ExaminationSection = ({ formData, onChange }: ExaminationSectionProps) => {
   const handleDictation = (fieldName: string) => (text: string) => {
     const event = {
       target: {
@@ -27,7 +26,6 @@ const ExaminationSection = ({ formData, onChange, apiKey }: ExaminationSectionPr
           <Label htmlFor="interrogation">À l'interrogatoire</Label>
           <DictationButton 
             onTranscript={handleDictation('interrogation')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea
@@ -44,7 +42,6 @@ const ExaminationSection = ({ formData, onChange, apiKey }: ExaminationSectionPr
           <Label htmlFor="clinicalExamination">À l'examen clinique</Label>
           <DictationButton 
             onTranscript={handleDictation('clinicalExamination')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea
@@ -72,7 +69,6 @@ const ExaminationSection = ({ formData, onChange, apiKey }: ExaminationSectionPr
           <Label htmlFor="lastBiologyResults">Le dernier bilan biologique</Label>
           <DictationButton 
             onTranscript={handleDictation('lastBiologyResults')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea

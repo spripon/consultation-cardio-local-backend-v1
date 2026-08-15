@@ -8,10 +8,9 @@ import { CardiologyFormData } from "./types";
 interface ConclusionSectionProps {
   formData: CardiologyFormData;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => void;
-  apiKey?: string;
 }
 
-const ConclusionSection = ({ formData, onChange, apiKey }: ConclusionSectionProps) => {
+const ConclusionSection = ({ formData, onChange }: ConclusionSectionProps) => {
   const handleDictation = (fieldName: string) => (text: string) => {
     const event = {
       target: {
@@ -28,7 +27,6 @@ const ConclusionSection = ({ formData, onChange, apiKey }: ConclusionSectionProp
           <Label htmlFor="conclusion">AU TOTAL</Label>
           <DictationButton 
             onTranscript={handleDictation('conclusion')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea
@@ -46,7 +44,6 @@ const ConclusionSection = ({ formData, onChange, apiKey }: ConclusionSectionProp
           <Label htmlFor="treatmentPlan">Conduite à tenir</Label>
           <DictationButton 
             onTranscript={handleDictation('treatmentPlan')}
-            apiKey={apiKey}
           />
         </div>
         <Textarea

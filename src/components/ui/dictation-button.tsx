@@ -4,14 +4,12 @@ import { useSpeechToText } from "@/hooks/useSpeechToText";
 
 interface DictationButtonProps {
   onTranscript: (text: string) => void;
-  apiKey?: string;
   size?: "sm" | "default" | "lg";
 }
 
-export const DictationButton = ({ onTranscript, apiKey, size = "sm" }: DictationButtonProps) => {
+export const DictationButton = ({ onTranscript, size = "sm" }: DictationButtonProps) => {
   const { isListening, isProcessing, startListening, stopListening } = useSpeechToText({
     onTranscript,
-    apiKey,
   });
 
   const handleClick = () => {

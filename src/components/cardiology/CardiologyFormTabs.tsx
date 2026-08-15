@@ -10,10 +10,9 @@ interface CardiologyFormTabsProps {
   formData: CardiologyFormData;
   onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   onGenderChange: (value: 'Monsieur' | 'Madame') => void;
-  apiKey?: string;
 }
 
-const CardiologyFormTabs = ({ formData, onChange, onGenderChange, apiKey }: CardiologyFormTabsProps) => {
+const CardiologyFormTabs = ({ formData, onChange, onGenderChange }: CardiologyFormTabsProps) => {
   return (
     <Tabs defaultValue="patient" className="w-full">
       <TabsList className="grid w-full grid-cols-4">
@@ -42,7 +41,6 @@ const CardiologyFormTabs = ({ formData, onChange, onGenderChange, apiKey }: Card
         <ClinicalSections 
           formData={formData} 
           onChange={onChange}
-          apiKey={apiKey}
         />
       </TabsContent>
 
@@ -50,7 +48,6 @@ const CardiologyFormTabs = ({ formData, onChange, onGenderChange, apiKey }: Card
         <ConclusionSection 
           formData={formData} 
           onChange={onChange}
-          apiKey={apiKey}
         />
       </TabsContent>
     </Tabs>
