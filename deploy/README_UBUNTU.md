@@ -22,13 +22,25 @@ Baseline auditée : voir [`docs/BASELINE.md`](../docs/BASELINE.md).
 ```bash
 bash deploy/install-host-deps.sh        # demande confirmation avant apt-get
 sudo usermod -aG docker "$USER"          # puis rouvrir la session
+docker compose version                   # doit fonctionner
 ```
 
-Le script installe `docker.io`, `docker-compose-plugin`, `git`, `curl`,
-`python3`, `tesseract-ocr(+fra,+eng)`, `ocrmypdf`. Il n'ajoute **aucune** règle
-de firewall, aucun tunnel, aucun `curl | sh`. Si vous préférez Docker CE du
-dépôt officiel Docker, ajoutez ce dépôt APT manuellement (clé GPG + source),
-puis passez cette étape.
+Le script installe `git`, `curl`, `ca-certificates`, `python3`, `python3-venv`,
+`python3-pip`, puis un Docker avec **Compose v2** :
+
+- si `docker compose version` fonctionne déjà, Docker n'est pas touché ;
+- sinon, `docker.io` + `docker-compose-v2` (paquets **Ubuntu**) ;
+- sinon `docker-ce` + `docker-compose-plugin` (paquets du **dépôt Docker
+  officiel**, s'il est déjà configuré) ;
+- sinon le script s'arrête et renvoie vers la procédure officielle Docker CE
+  (ajout manuel du dépôt APT : clé GPG + source). Aucun `curl | sh`.
+
+Aucun paquet Docker existant n'est désinstallé, aucune règle de firewall n'est
+ajoutée, aucun tunnel n'est configuré.
+
+**Node/npm ne sont pas nécessaires sur l'hôte** : le frontend est compilé dans
+l'image Docker `web` (`deploy/Dockerfile.web`, étape builder `node:22-alpine`).
+Tesseract et ocrmypdf sont embarqués dans l'image API.
 
 ## 2. Cloner le dépôt
 
@@ -87,16 +99,25 @@ make -f deploy/Makefile models          # modèle PII français OpenMed 2.0
 make -f deploy/Makefile models-speech   # + faster-whisper small (si dictée)
 ```
 
+Le script crée un venv d'installation dédié `deploy/.venv-models` (Ubuntu récent
+refuse `pip install --user`, PEP 668) et y installe `huggingface_hub`. Aucun
+jeton Hugging Face n'est nécessaire : les modèles sont publics.
+
 Les poids vont dans `deploy/models/` (ignoré par Git) et sont montés en lecture
 seule sous `/models` dans le conteneur. Après cette étape, le runtime est de
 nouveau strictement hors ligne (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`) et
 aucun téléchargement n'est possible pendant un traitement.
 
-## 5. Construire
+## 5. Construire les images
 
 ```bash
-make -f deploy/Makefile build     # npm ci && npm run build, puis image API
+make -f deploy/Makefile build     # docker compose build : web (frontend) + api
 ```
+
+Le frontend est compilé dans l'image `web` ; rien n'est construit sur l'hôte et
+aucun répertoire `dist/` hôte n'est utilisé. Le contexte de build est filtré par
+le `.dockerignore` racine : ni `backend/.env`, ni `deploy/caddy.env`, ni
+`deploy/models/` n'entrent dans une image.
 
 ## 6. Vérifier puis démarrer
 
@@ -106,10 +127,22 @@ make -f deploy/Makefile validate    # no-egress + compose config + build API
 make -f deploy/Makefile up          # dépend de preflight
 ```
 
-`validate-install.sh --start` démarre puis interroge `/api/v1/health` et
-`/api/v1/readyz`. Un `401` sans identifiants est normal (Basic Auth) ; un `503`
-sur `readyz` signifie qu'un composant local requis manque — comportement
-fail-closed attendu.
+`bash deploy/validate-install.sh --start` démarre la pile puis valide, sans
+jamais lire ni afficher `BASIC_AUTH_HASH` et sans mot de passe en clair :
+
+1. Caddy interrogé localement avec le bon Host/SNI
+   (`curl --resolve consultation.cardiologie-tarbes.org:443:127.0.0.1`) : un
+   **HTTP 401** sans identifiants prouve que Basic Auth est actif ;
+2. `/api/v1/health` et `/api/v1/readyz` sondés **directement dans le conteneur
+   API** (`docker compose exec -T api`), qui doivent répondre **200** ;
+3. si `readyz` renvoie 503, le script sort en code non nul et affiche les
+   composants `missing` (fail-closed, aucun contenu patient).
+
+Le script ne sort en 0 que si les trois contrôles passent.
+
+Le préflight tolère les ports 80/443 occupés **par le conteneur attendu
+`cardio-web` déjà démarré** : `make up` reste donc idempotent sur une pile en
+cours d'exécution. Tout autre occupant du port fait échouer le préflight.
 
 ## 7. DNS pour `consultation.cardiologie-tarbes.org`
 
@@ -154,7 +187,7 @@ docker compose -f deploy/docker-compose.yml exec api python -c \
 ```bash
 make -f deploy/Makefile down
 git checkout <sha-github-precedent>
-make -f deploy/Makefile build
+make -f deploy/Makefile build      # reconstruit web + api depuis ce SHA
 make -f deploy/Makefile up
 ```
 
