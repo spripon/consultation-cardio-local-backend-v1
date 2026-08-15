@@ -33,5 +33,4 @@ venv/
 # Secrets et artefacts de deploiement
 backend/.env
 deploy/models/
-deploy/caddy-auth/*.conf
 deploy/caddy.env
