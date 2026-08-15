@@ -16,6 +16,9 @@ services:
       - ./models:/models:ro
     tmpfs:
       - /tmp/consultation-cardio:size=512m,mode=1700
+      # Système de fichiers racine en lecture seule : /tmp doit rester inscriptible
+      # (fichiers temporaires OCR, effacés à l'arrêt du conteneur).
+      - /tmp:size=1g,mode=1777
     # Pas de ports publiés : uniquement joignable par Caddy sur le réseau interne.
     expose:
       - "8000"
