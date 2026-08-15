@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ensure_temp_root()
+    logger.info(
+        "startup env=%s policy=%s require_openmed=%s speech=%s",
+        settings.app_env,
+        settings.openmed_policy,
+        settings.require_openmed,
+        settings.enable_speech,
+    )
+    if settings.is_production and settings.allow_raw_ocr_debug:
+        logger.warning("ALLOW_RAW_OCR_DEBUG ignoré : interdit en production.")
+    yield
+
+
 app = FastAPI(
     title="CardioConsult — API locale",
     description=(
@@ -27,6 +44,7 @@ app = FastAPI(
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None,
     openapi_url=None if settings.is_production else "/openapi.json",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -39,17 +57,3 @@ app.add_middleware(
 
 for router in (health.router, extract.router, anonymize.router, categorize.router, transcribe.router):
     app.include_router(router, prefix=settings.api_v1_prefix)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    ensure_temp_root()
-    logger.info(
-        "startup env=%s policy=%s require_openmed=%s speech=%s",
-        settings.app_env,
-        settings.openmed_policy,
-        settings.require_openmed,
-        settings.enable_speech,
-    )
-    if settings.is_production and settings.allow_raw_ocr_debug:
-        logger.warning("ALLOW_RAW_OCR_DEBUG ignoré : interdit en production.")
