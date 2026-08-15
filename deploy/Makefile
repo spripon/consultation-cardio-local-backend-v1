@@ -1,22 +1,23 @@
-# Cibles de déploiement. Aucune action destructive implicite :
-# rien n'est supprimé, aucun volume n'est purgé, aucun processus n'est tué.
+# Cibles de deploiement. Aucune action destructive implicite.
 SHELL := /bin/bash
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))..)
 COMPOSE := docker compose -f $(ROOT)/deploy/docker-compose.yml
 
-.PHONY: help preflight prepare-config models models-speech build validate up down logs-api
+.PHONY: help preflight prepare-config models models-speech build validate up down logs-api logs-web cloudflare-check
 
 help:
 	@echo "Cibles disponibles :"
-	@echo "  make prepare-config  Crée backend/.env et deploy/caddy.env (jamais écrasés)"
-	@echo "  make models          Télécharge le modèle PII local (phase installation)"
-	@echo "  make models-speech   Idem + modèle faster-whisper small"
-	@echo "  make build           Construit les images Docker (web + api), sans npm hôte"
-	@echo "  make preflight       Vérifications lecture seule avant démarrage"
-	@echo "  make validate        no-egress + compose config + build images (sans démarrage)"
-	@echo "  make up              preflight puis docker compose up -d"
-	@echo "  make down            Arrête la pile (volumes conservés)"
-	@echo "  make logs-api        Journaux de l'API (sans contenu patient)"
+	@echo "  make prepare-config   Cree backend/.env et deploy/caddy.env"
+	@echo "  make models           Telecharge le modele PII local"
+	@echo "  make models-speech    Idem + faster-whisper small"
+	@echo "  make build            Construit les images Docker web + api"
+	@echo "  make preflight        Verifications locales lecture seule"
+	@echo "  make validate         no-egress + compose config + build, sans demarrage"
+	@echo "  make up               Preflight puis demarre api+web sur 127.0.0.1:8091"
+	@echo "  make cloudflare-check Valide le chemin public via Cloudflare Tunnel"
+	@echo "  make down             Arrete uniquement cette pile"
+	@echo "  make logs-api         Journaux API"
+	@echo "  make logs-web         Journaux Caddy/frontend"
 
 prepare-config:
 	bash $(ROOT)/deploy/prepare-config.sh
@@ -39,8 +40,14 @@ validate:
 up: preflight
 	$(COMPOSE) up -d
 
+cloudflare-check:
+	bash $(ROOT)/deploy/validate-cloudflare-tunnel.sh
+
 down:
 	$(COMPOSE) down
 
 logs-api:
 	$(COMPOSE) logs -f --tail=200 api
+
+logs-web:
+	$(COMPOSE) logs -f --tail=200 web
