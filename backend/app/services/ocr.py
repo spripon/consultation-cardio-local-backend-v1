@@ -22,6 +22,10 @@ class OcrUnavailable(RuntimeError):
     """Un moteur OCR local requis est absent."""
 
 
+class PdfTooLong(ValueError):
+    """Le PDF dépasse MAX_PDF_PAGES : refus explicite, jamais de troncature."""
+
+
 @dataclass
 class OcrResult:
     text: str
@@ -104,6 +108,26 @@ def ocr_image_bytes(data: bytes, content_type: str) -> OcrResult:
     return OcrResult(text=text, confidence=confidence, source="tesseract", pages=1)
 
 
+def _pdf_page_count(pdf_path: Path) -> int:
+    try:
+        import pdfplumber  # type: ignore
+    except Exception as exc:
+        raise OcrUnavailable("pdfplumber n'est pas installé sur ce serveur.") from exc
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        return len(pdf.pages)
+
+
+def _ensure_page_budget(pdf_path: Path) -> int:
+    """Refuse un PDF trop long AVANT extraction (aucun compte rendu partiel)."""
+    total = _pdf_page_count(pdf_path)
+    if total > settings.max_pdf_pages:
+        raise PdfTooLong(
+            f"PDF de {total} pages : la limite est de {settings.max_pdf_pages} pages. "
+            "Le document est refusé pour éviter toute extraction partielle silencieuse."
+        )
+    return total
+
+
 def _pdf_text_layer(pdf_path: Path) -> tuple[str, int]:
     try:
         import pdfplumber  # type: ignore
@@ -112,7 +136,7 @@ def _pdf_text_layer(pdf_path: Path) -> tuple[str, int]:
 
     chunks: list[str] = []
     with pdfplumber.open(str(pdf_path)) as pdf:
-        pages = pdf.pages[: settings.max_pdf_pages]
+        pages = pdf.pages
         total = len(pages)
         for page in pages:
             chunks.append(page.extract_text() or "")
@@ -152,6 +176,7 @@ def ocr_pdf_bytes(data: bytes) -> OcrResult:
     pdf_path = workdir / "input.pdf"
     try:
         pdf_path.write_bytes(data)
+        _ensure_page_budget(pdf_path)
         text, pages = _pdf_text_layer(pdf_path)
         if len(text) >= 200:
             return OcrResult(text=text, confidence=0.98, source="pdf_text_layer", pages=pages)
@@ -180,6 +205,7 @@ def run_ocr(data: bytes, content_type: str) -> OcrResult:
 __all__ = [
     "OcrResult",
     "OcrUnavailable",
+    "PdfTooLong",
     "UnsupportedFormat",
     "ensure_temp_root",
     "ocr_image_bytes",
