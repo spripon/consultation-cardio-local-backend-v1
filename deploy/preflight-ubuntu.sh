@@ -110,10 +110,25 @@ for f in backend/.env deploy/caddy.env; do
 done
 
 if [ -f deploy/caddy.env ]; then
-  if grep -qE '^BASIC_AUTH_HASH=\$2[aby]\$' deploy/caddy.env; then
-    ok "BASIC_AUTH_HASH renseigné (valeur non affichée)"
+  # Accepte BASIC_AUTH_HASH='$2a$...' (recommandé) ou sans apostrophes.
+  # La valeur n'est jamais affichée.
+  HASH_LINE=$(grep -E '^BASIC_AUTH_HASH=' deploy/caddy.env | tail -1 | cut -d= -f2-)
+  HASH_VALUE=${HASH_LINE%$'\r'}
+  case "$HASH_VALUE" in
+    \'*\') HASH_VALUE=${HASH_VALUE#\'}; HASH_VALUE=${HASH_VALUE%\'}; QUOTED=1 ;;
+    \"*\") HASH_VALUE=${HASH_VALUE#\"}; HASH_VALUE=${HASH_VALUE%\"}; QUOTED=0 ;;
+    *) QUOTED=0 ;;
+  esac
+  if [ -z "$HASH_VALUE" ]; then
+    fail "BASIC_AUTH_HASH absent dans deploy/caddy.env"
+  elif ! printf '%s' "$HASH_VALUE" | grep -qE '^\$2[aby]\$[0-9]{2}\$.{20,}$'; then
+    fail "BASIC_AUTH_HASH n'est pas un hash bcrypt valide (valeur non affichée)"
+  elif printf '%s' "$HASH_VALUE" | grep -qi 'REMPLACER_PAR_LE_HASH'; then
+    fail "BASIC_AUTH_HASH est encore le placeholder d'exemple — générer un vrai hash bcrypt"
+  elif [ "$QUOTED" -ne 1 ]; then
+    fail "BASIC_AUTH_HASH doit être entouré d'apostrophes simples : BASIC_AUTH_HASH='\$2a\$14\$...' (sinon Docker Compose tronque les \$)"
   else
-    fail "BASIC_AUTH_HASH absent ou non hashé dans deploy/caddy.env"
+    ok "BASIC_AUTH_HASH renseigné, bcrypt, single-quoted (valeur non affichée)"
   fi
   perm=$(stat -c '%a' deploy/caddy.env)
   case "$perm" in

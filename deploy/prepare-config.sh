@@ -35,7 +35,15 @@ cat <<'INFO'
 
 2) deploy/caddy.env  (jamais committé)
    - BASIC_AUTH_USER=<identifiant>
-   - BASIC_AUTH_HASH=<hash bcrypt>
+   - BASIC_AUTH_HASH='<hash bcrypt>'   # apostrophes simples OBLIGATOIRES
+
+   Exemple :
+
+     BASIC_AUTH_USER=cardio
+     BASIC_AUTH_HASH='$2a$14$abcdefghijklmnopqrstuv...'
+
+   Sans apostrophes simples, Docker Compose interprète les `$` du hash bcrypt
+   comme des variables et Caddy reçoit une valeur tronquée.
 
    Générer le hash localement (le mot de passe en clair ne doit JAMAIS être
    écrit dans un fichier du dépôt, ni committé, ni collé dans un ticket) :
