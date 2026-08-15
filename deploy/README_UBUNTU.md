@@ -44,14 +44,13 @@ Tesseract et ocrmypdf sont embarqués dans l'image API.
 
 ## 2. Cloner le dépôt
 
-```bash
-git clone https://github.com/spripon/consultation-cardio-local-backend-v1.git
-cd consultation-cardio-local-backend-v1
-git checkout main
-```
+Utilisez la branche de déploiement stable `release/ubuntu-v1` :
 
-(Le nom `spripon/consultation-cardio-local-backend-v1` est un placeholder tant
-que le dépôt privé n'a pas été créé depuis Lovable.)
+```bash
+git clone --branch release/ubuntu-v1 --single-branch \
+  https://github.com/spripon/consultation-cardio-local-backend-v1.git
+cd consultation-cardio-local-backend-v1
+```
 
 ## 3. Configuration locale
 
@@ -84,8 +83,13 @@ Reportez la sortie dans `deploy/caddy.env` :
 
 ```
 BASIC_AUTH_USER=cardio
-BASIC_AUTH_HASH=$2a$14$...
+BASIC_AUTH_HASH='$2a$14$...'
 ```
+
+Les **apostrophes simples autour du hash sont obligatoires** : sans elles,
+Docker Compose interprète les `$` du hash bcrypt comme des variables et
+transmet une valeur tronquée à Caddy (authentification cassée). Le préflight
+refuse un hash non quoté ou resté au placeholder.
 
 Le mot de passe en clair ne doit jamais être écrit dans un fichier du dépôt,
 committé, ni transmis par messagerie. Si `deploy/caddy.env` est absent,
@@ -196,8 +200,9 @@ make -f deploy/Makefile up
 Jamais d'auto-update. Après revue et validation d'une nouvelle version :
 
 ```bash
-git fetch origin && git log --oneline HEAD..origin/main   # revue
-git checkout main && git pull
+git fetch origin release/ubuntu-v1
+git log --oneline HEAD..origin/release/ubuntu-v1          # revue
+git merge --ff-only origin/release/ubuntu-v1
 make -f deploy/Makefile build validate up
 ```
 
