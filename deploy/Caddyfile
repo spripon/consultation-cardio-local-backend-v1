@@ -1,0 +1,37 @@
+# Remplacer par le domaine réel ; utiliser :80 pour un test LAN sans TLS.
+consultation.cardiologie-tarbes.org {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "microphone=(self), camera=(self), geolocation=()"
+		-Server
+	}
+
+	# API locale : même origine que le frontend, donc pas de CORS en production.
+	handle /api/* {
+		reverse_proxy api:8000 {
+			header_up X-Request-Id {http.request.uuid}
+		}
+	}
+
+	# Frontend statique (build Vite).
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+
+	request_body {
+		max_size 20MB
+	}
+
+	# Journalisation sans contenu patient.
+	log {
+		output file /data/access.log
+		format json
+	}
+}
