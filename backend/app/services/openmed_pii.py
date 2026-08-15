@@ -1,11 +1,17 @@
-"""Adaptateur local autour d'OpenMed 2.0 (détection PII par modèle).
+"""Adaptateur local autour d'OpenMed 2.0 (détection PII par modèle, français).
+
+API officielle utilisée :
+    openmed.extract_pii(text, model_name=..., lang="fr",
+                        confidence_threshold=..., use_smart_merging=True)
+et lecture de `result.entities`.
 
 Le module est tolérant à l'absence du paquet `openmed` au démarrage, mais
-`/extract` échoue en production si `REQUIRE_OPENMED=true` : aucun repli cloud
-n'existe. Aucun téléchargement de modèle n'est déclenché pendant une requête
-contenant des données patient ; le modèle doit être présent localement
-(`OPENMED_PII_MODEL`, par défaut `/models/openmed-pii`) et le hub est forcé en
-mode hors-ligne.
+`/extract` et `/anonymize` échouent en 503 dès que OpenMed est requis
+(obligatoire par défaut en production) : aucun repli cloud n'existe et aucun
+repli silencieux sur la seule couche déterministe. Aucun téléchargement de
+modèle n'est déclenché pendant une requête contenant des données patient : le
+modèle doit être présent localement (`OPENMED_PII_MODEL`, par défaut
+`/models/openmed-pii-fr`) et le hub est forcé hors-ligne.
 """
 
 from __future__ import annotations
@@ -27,31 +33,65 @@ _STATE: dict[str, object] = {"loaded": False, "engine": None, "error": None}
 #: Correspondance des étiquettes OpenMed / HF vers nos types internes.
 LABEL_MAP = {
     "PATIENT": "NAME",
+    "PATIENT_NAME": "NAME",
     "NAME": "NAME",
+    "FULL_NAME": "NAME",
+    "LAST_NAME": "NAME",
+    "LASTNAME": "NAME",
+    "FAMILY_NAME": "NAME",
+    "NOM": "NAME",
     "PERSON": "NAME",
+    "PERSON_NAME": "NAME",
     "PER": "NAME",
     "FIRSTNAME": "FIRSTNAME",
+    "FIRST_NAME": "FIRSTNAME",
     "GIVENNAME": "FIRSTNAME",
+    "GIVEN_NAME": "FIRSTNAME",
+    "PRENOM": "FIRSTNAME",
     "SURNAME": "NAME",
     "DOCTOR": "DOCTOR",
+    "PHYSICIAN": "DOCTOR",
+    "PROVIDER": "DOCTOR",
+    "HEALTHCARE_PROVIDER": "DOCTOR",
+    "STAFF": "DOCTOR",
     "HCW": "DOCTOR",
     "DATE_OF_BIRTH": "DOB",
+    "DATEOFBIRTH": "DOB",
     "DOB": "DOB",
     "BIRTHDATE": "DOB",
+    "BIRTH_DATE": "DOB",
     "PHONE": "PHONE",
     "PHONE_NUMBER": "PHONE",
+    "TELEPHONE": "PHONE",
+    "FAX": "PHONE",
     "CONTACT": "PHONE",
     "EMAIL": "EMAIL",
+    "EMAIL_ADDRESS": "EMAIL",
     "ADDRESS": "ADDRESS",
+    "STREET_ADDRESS": "ADDRESS",
+    "ADRESSE": "ADDRESS",
     "LOCATION": "ADDRESS",
     "STREET": "ADDRESS",
     "ZIP": "ADDRESS",
+    "ZIPCODE": "ADDRESS",
+    "POSTCODE": "ADDRESS",
+    "POSTAL_CODE": "ADDRESS",
     "CITY": "ADDRESS",
+    "COUNTRY": "ADDRESS",
+    "HOSPITAL": "ADDRESS",
+    "ORGANIZATION": "ADDRESS",
     "ID": "ID",
     "IDNUM": "ID",
+    "ID_NUMBER": "ID",
+    "NATIONAL_ID": "NIR",
+    "NIR": "NIR",
     "MEDICALRECORD": "IPP",
+    "MEDICAL_RECORD_NUMBER": "IPP",
+    "MEDICAL_RECORD": "IPP",
     "MRN": "IPP",
+    "IPP": "IPP",
     "SSN": "NIR",
+    "SOCIAL_SECURITY_NUMBER": "NIR",
     "SOCIALSECURITY": "NIR",
 }
 
@@ -70,6 +110,8 @@ def _force_offline() -> None:
     if settings.hf_hub_offline:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    if settings.openmed_offline:
+        os.environ.setdefault("OPENMED_OFFLINE", "1")
 
 
 def _load_engine():

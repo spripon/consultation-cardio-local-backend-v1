@@ -36,7 +36,8 @@ class ExtractionResponse(BaseModel):
     confidence: ConfidenceBlock = Field(default_factory=ConfidenceBlock)
     warnings: list[str] = Field(default_factory=list)
     requiresHumanValidation: bool = True
-    safeToInject: bool = True
+    #: Défaut volontairement restrictif : aucune injection sans validation explicite.
+    safeToInject: bool = False
     #: Uniquement hors production et si ALLOW_RAW_OCR_DEBUG=true.
     debugRawText: str | None = None
 
@@ -51,7 +52,7 @@ class AnonymizeResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     requiresHumanValidation: bool = True
-    safeToInject: bool = True
+    safeToInject: bool = False
 
 
 class CategorizeRequest(BaseModel):
@@ -75,3 +76,5 @@ class HealthResponse(BaseModel):
     speech: bool
     policy: str
     environment: str
+    ready: bool = False
+    missing: list[str] = Field(default_factory=list)

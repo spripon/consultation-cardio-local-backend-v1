@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     # strict_no_leak : supprime aussi âge / sexe / dates cliniques
     # gdpr_pseudonymization : conserve âge / sexe / dates cliniques (défaut cardio)
     openmed_policy: str = "gdpr_pseudonymization"
-    openmed_pii_model: str = "/models/openmed-pii"
-    require_openmed: bool = False
+    openmed_pii_model: str = "/models/openmed-pii-fr"
+    openmed_language: str = "fr"
+    openmed_confidence_threshold: float = 0.35
+    openmed_offline: bool = True
+    #: None = valeur déduite de l'environnement (obligatoire en production).
+    require_openmed: bool | None = None
     redact_doctor_names: bool = True
     hf_hub_offline: bool = True
 
@@ -58,6 +62,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in {"production", "prod"}
+
+    @property
+    def openmed_required(self) -> bool:
+        """OpenMed est obligatoire en production sauf désactivation explicite."""
+        if self.require_openmed is None:
+            return self.is_production
+        return self.require_openmed
+
+    @property
+    def ocr_required(self) -> bool:
+        """L'OCR local est indispensable au service : jamais de repli."""
+        return True
 
     @property
     def debug_raw_ocr_allowed(self) -> bool:
