@@ -297,10 +297,14 @@ def safety_sweep(text: str) -> list[Finding]:
         if pii_type not in HIGH_RISK_TYPES:
             continue
         for match in pattern.finditer(text):
-            value = _clean_value(match.group(0))
+            raw = match.group(0)
             # Un fragment contenant déjà un jeton d'anonymisation n'est pas un
-            # résidu : c'est du texte déjà masqué (ex. « [ADRESSE] : Dr [MEDECIN] »).
-            if not value or "[" in value or "]" in value:
+            # résidu : c'est du texte déjà masqué (ex. « [ADRESSE] »). Le test
+            # porte sur la chaîne BRUTE, avant nettoyage des crochets.
+            if "[" in raw or "]" in raw:
+                continue
+            value = _clean_value(raw)
+            if not value:
                 continue
             if pii_type in _NAME_LIKE_TYPES and not _is_plausible_name(value):
                 continue
