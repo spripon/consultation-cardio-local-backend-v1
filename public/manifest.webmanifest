@@ -1,0 +1,16 @@
+{
+  "name": "Consultation Cardiologie — Rythmologie",
+  "short_name": "Consult Cardio",
+  "description": "Compte rendu de consultation de rythmologie, traitement 100 % local et auto-hebergé.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "lang": "fr",
+  "icons": [
+    { "src": "/favicon.ico", "sizes": "48x48", "type": "image/x-icon" },
+    { "src": "/og-image.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
