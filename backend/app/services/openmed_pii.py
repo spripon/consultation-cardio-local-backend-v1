@@ -1,23 +1,23 @@
 """Adaptateur local autour d'OpenMed 2.0 (détection PII par modèle, français).
 
-API officielle utilisée :
-    openmed.extract_pii(text, model_name=..., lang="fr",
-                        confidence_threshold=..., use_smart_merging=True)
-et lecture de `result.entities`.
+Le modèle OpenMed est utilisé comme seconde couche après les règles déterministes.
+Cette couche est volontairement CONSERVATRICE vis-à-vis des valeurs cliniques :
+un label modèle seul ne suffit pas à transformer n'importe quel nombre en ID.
 
-Le module est tolérant à l'absence du paquet `openmed` au démarrage, mais
-`/extract` et `/anonymize` échouent en 503 dès que OpenMed est requis
-(obligatoire par défaut en production) : aucun repli cloud n'existe et aucun
-repli silencieux sur la seule couche déterministe. Aucun téléchargement de
-modèle n'est déclenché pendant une requête contenant des données patient : le
-modèle doit être présent localement (`OPENMED_PII_MODEL`, par défaut
-`/models/openmed-pii-fr`) et le hub est forcé hors-ligne.
+Principes de filtrage :
+  * labels OpenMed inconnus -> ignorés (plus de fallback automatique vers [ID]);
+  * DOB/IPP/ID/téléphone/NIR numériques -> validation de forme et/ou contexte;
+  * valeurs cliniques (dose, TA, FC, poids, FE, dimensions, biologie...) -> conservées;
+  * LOCATION/HOSPITAL/ORGANIZATION/CITY/COUNTRY -> non assimilés automatiquement
+    à l'adresse personnelle du patient;
+  * aucune donnée n'est journalisée, aucun téléchargement au runtime.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 _STATE: dict[str, object] = {"loaded": False, "engine": None, "error": None}
 
-#: Correspondance des étiquettes OpenMed / HF vers nos types internes.
+# Correspondance EXPLICITE uniquement. Un label inconnu n'est plus transformé
+# automatiquement en ID : c'était la cause principale du sur-masquage de nombres
+# cliniques (FE, TA, poids, doses, DFG, fréquence, dimensions, etc.).
 LABEL_MAP = {
     "PATIENT": "NAME",
     "PATIENT_NAME": "NAME",
@@ -70,16 +72,7 @@ LABEL_MAP = {
     "ADDRESS": "ADDRESS",
     "STREET_ADDRESS": "ADDRESS",
     "ADRESSE": "ADDRESS",
-    "LOCATION": "ADDRESS",
     "STREET": "ADDRESS",
-    "ZIP": "ADDRESS",
-    "ZIPCODE": "ADDRESS",
-    "POSTCODE": "ADDRESS",
-    "POSTAL_CODE": "ADDRESS",
-    "CITY": "ADDRESS",
-    "COUNTRY": "ADDRESS",
-    "HOSPITAL": "ADDRESS",
-    "ORGANIZATION": "ADDRESS",
     "ID": "ID",
     "IDNUM": "ID",
     "ID_NUMBER": "ID",
@@ -94,6 +87,64 @@ LABEL_MAP = {
     "SOCIAL_SECURITY_NUMBER": "NIR",
     "SOCIALSECURITY": "NIR",
 }
+
+# Ces catégories peuvent être pertinentes pour d'autres politiques de
+# dé-identification, mais ne correspondent pas à une donnée identifiante directe
+# du patient dans notre politique cardio. Les transformer en ADDRESS/ID détruit
+# inutilement le contenu clinique (établissement, marque, année, lieu de soin...).
+IGNORED_LABELS = {
+    "LOCATION",
+    "LOC",
+    "CITY",
+    "COUNTRY",
+    "ZIP",
+    "ZIPCODE",
+    "POSTCODE",
+    "POSTAL_CODE",
+    "HOSPITAL",
+    "ORGANIZATION",
+    "ORGANISATION",
+    "FACILITY",
+    "HEALTHCARE_FACILITY",
+    "DATE",
+    "AGE",
+    "SEX",
+    "GENDER",
+}
+
+_DOB_RE = re.compile(r"\b\d{1,2}[/\-.]\d{1,2}[/\-.](?:19|20)\d{2}\b")
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+_PHONE_RE = re.compile(r"^(?:(?:\+|00)33[ .\-]?[1-9]|0[1-9])(?:[ .\-]?\d{2}){4}$")
+_NIR_RE = re.compile(r"^[12][ .]?\d{2}[ .]?\d{2}[ .]?\d{2,3}[ .]?\d{2,3}[ .]?\d{3}(?:[ .]?\d{2})?$")
+
+_BIRTH_CONTEXT_RE = re.compile(
+    r"(?:date\s+de\s+naissance|n[ée]e?\s+le|dob|birth\s*date)", re.IGNORECASE
+)
+_ID_CONTEXT_RE = re.compile(
+    r"(?:\bipp\b|\bmrn\b|\bnda\b|identifiant\s+(?:patient|dossier)|"
+    r"n[°ºo]?\s*(?:de\s*)?(?:dossier|patient|s[ée]jour)|num[ée]ro\s+(?:de\s+)?dossier|"
+    r"patient\s*id|id\s*patient|n[°ºo]?\s*s[ée]jour)",
+    re.IGNORECASE,
+)
+_ADDRESS_CONTEXT_RE = re.compile(
+    r"(?:\badresse\b|\bdomicile\b|\bdemeurant\b|\brue\b|\bavenue\b|\bav\.\b|"
+    r"\bboulevard\b|\bbd\b|\bimpasse\b|\ball[ée]e\b|\bchemin\b|\bplace\b|\broute\b)",
+    re.IGNORECASE,
+)
+
+# Hints volontairement larges : si un nombre est voisin d'un contexte clinique,
+# on préfère le conserver. Les identifiants directs restent couverts par les
+# règles déterministes et par les validateurs spécifiques ci-dessus.
+_CLINICAL_CONTEXT_RE = re.compile(
+    r"(?:\bmg\b|\bµg\b|\bug\b|\bg\b|\bkg\b|\bml\b|\bmmhg\b|\bbpm\b|/\s*min(?:ute)?|"
+    r"\bmm\b|\bcm2?\b|\bm2\b|\b%\b|\bmmol\b|\bmmol/l\b|\bµmol\b|\bumol\b|"
+    r"\bmg/l\b|\bg/l\b|\bml/min\b|\bdfg\b|cr[ée]atinin|kali[ée]m|glyc[ée]m|"
+    r"\bldl\b|\bhdl\b|albumin|\brac\b|\bta\b|tension|\bpoids\b|\bfc\b|fr[ée]quence|"
+    r"\bfevg\b|\bfe\b|\bpaps\b|\bdtd\b|septal|paroi|oreillette|ventricul|"
+    r"seuil|imp[ée]dance|d[ée]tection|stimulation|dose|comprim[ée]|\bcp\b|g[ée]lule|\bgel\b|"
+    r"matin|soir|rythme|flutter|sinusal|bloc|repolarisation)",
+    re.IGNORECASE,
+)
 
 
 class OpenMedUnavailable(RuntimeError):
@@ -121,24 +172,18 @@ def _load_engine():
 
     try:
         import openmed  # type: ignore
-    except Exception as exc:  # pragma: no cover - dépend de l'environnement
+    except Exception as exc:  # pragma: no cover
         raise OpenMedUnavailable(f"paquet openmed indisponible ({exc.__class__.__name__})") from exc
 
-    # Un chemin local est exigé lorsqu'il ressemble à un répertoire de modèle.
     if model_path.startswith("/") and not Path(model_path).exists():
         raise OpenMedUnavailable(
             "modèle PII local absent : exécutez scripts/download_openmed_model.py avant utilisation"
         )
 
-    # Warm-up SYNTHÉTIQUE (aucune donnée patient, jamais journalisé) exécuté une
-    # seule fois : il valide réellement le chargement des poids/tokenizer et la
-    # compatibilité de l'API avec les paramètres exacts du runtime. Le mode
-    # hors-ligne est déjà forcé ci-dessus : aucun téléchargement possible.
     _warmup(openmed)
     return openmed
 
 
-#: Chaîne fictive française, sans aucune donnée patient réelle.
 WARMUP_TEXT = "Le patient X a consulté le service de cardiologie."
 
 
@@ -153,7 +198,7 @@ def _warmup(openmed) -> None:
             confidence_threshold=settings.openmed_confidence_threshold,
             use_smart_merging=True,
         )
-    except Exception as exc:  # pragma: no cover - dépend des poids locaux
+    except Exception as exc:  # pragma: no cover
         raise OpenMedUnavailable(
             f"chargement du modèle PII local impossible ({exc.__class__.__name__})"
         ) from exc
@@ -186,43 +231,149 @@ def status() -> OpenMedStatus:
     return OpenMedStatus(available=True)
 
 
-def _normalise_entities(raw_entities) -> list[Finding]:
+def _normalise_label(label: str) -> str:
+    return (
+        label.upper()
+        .replace("B-", "")
+        .replace("I-", "")
+        .replace(" ", "_")
+        .replace("-", "_")
+    )
+
+
+def _entity_fields(entity) -> tuple[str, str, float, int | None, int | None]:
+    if isinstance(entity, dict):
+        label = str(entity.get("entity_group") or entity.get("label") or entity.get("type") or "")
+        value = str(entity.get("word") or entity.get("text") or entity.get("value") or "")
+        score = float(entity.get("confidence") or entity.get("score") or 0.8)
+        start = entity.get("start")
+        end = entity.get("end")
+    else:
+        label = str(
+            getattr(entity, "label", None)
+            or getattr(entity, "entity_group", None)
+            or getattr(entity, "type", None)
+            or ""
+        )
+        value = str(
+            getattr(entity, "text", None)
+            or getattr(entity, "word", None)
+            or getattr(entity, "value", None)
+            or ""
+        )
+        score = float(getattr(entity, "confidence", None) or getattr(entity, "score", None) or 0.8)
+        start = getattr(entity, "start", None)
+        end = getattr(entity, "end", None)
+    return label, value.strip(), score, start if isinstance(start, int) else None, end if isinstance(end, int) else None
+
+
+def _context_for(text: str, value: str, start: int | None, end: int | None, window: int = 60) -> str:
+    if start is None or end is None or start < 0 or end < start or end > len(text):
+        idx = text.lower().find(value.lower()) if value else -1
+        if idx < 0:
+            return ""
+        start, end = idx, idx + len(value)
+    return text[max(0, start - window): min(len(text), end + window)]
+
+
+def _contains_digit(value: str) -> bool:
+    return any(ch.isdigit() for ch in value)
+
+
+def _looks_like_person_name(value: str) -> bool:
+    if len(value) < 2 or len(value) > 80 or _contains_digit(value):
+        return False
+    return bool(re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]", value))
+
+
+def _looks_clinical_numeric(value: str, context: str) -> bool:
+    if not _contains_digit(value):
+        return False
+    if _CLINICAL_CONTEXT_RE.search(context):
+        return True
+    # Une valeur courte purement numérique/mesure sans contexte d'identifiant est
+    # bien plus probablement clinique qu'un identifiant administratif.
+    compact = re.sub(r"\s+", "", value)
+    return bool(re.fullmatch(r"\d{1,4}(?:[.,]\d{1,4})?(?:/\d{1,4})?%?", compact))
+
+
+def _accept_entity(pii_type: str, value: str, context: str) -> bool:
+    """Garde seulement les entités suffisamment plausibles pour être du PII direct."""
+    if not value or "[" in value or "]" in value:
+        return False
+
+    if pii_type in {"NAME", "FIRSTNAME"}:
+        return _looks_like_person_name(value)
+
+    if pii_type == "DOCTOR":
+        return settings.redact_doctor_names and _looks_like_person_name(value)
+
+    if pii_type == "EMAIL":
+        return bool(_EMAIL_RE.fullmatch(value))
+
+    if pii_type == "PHONE":
+        return bool(_PHONE_RE.fullmatch(value))
+
+    if pii_type == "NIR":
+        return bool(_NIR_RE.fullmatch(value))
+
+    if pii_type == "DOB":
+        # Une TA 120/80 ou une année clinique 2018 ne peut plus devenir DOB.
+        return bool(_DOB_RE.fullmatch(value)) and bool(_BIRTH_CONTEXT_RE.search(context))
+
+    if pii_type in {"IPP", "ID"}:
+        # Ne jamais masquer un nombre clinique simplement parce que le modèle l'a
+        # étiqueté ID. Un contexte administratif explicite est obligatoire.
+        if _looks_clinical_numeric(value, context):
+            return False
+        return bool(_ID_CONTEXT_RE.search(context))
+
+    if pii_type == "ADDRESS":
+        # Une adresse personnelle doit contenir du texte/adressage plausible.
+        # Un simple nombre, une année ou une mesure ne suffit jamais.
+        if _looks_clinical_numeric(value, context):
+            return False
+        if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]", value):
+            return False
+        return bool(_ADDRESS_CONTEXT_RE.search(value) or _ADDRESS_CONTEXT_RE.search(context))
+
+    return False
+
+
+def _normalise_entities(raw_entities, text: str) -> list[Finding]:
     findings: list[Finding] = []
     for entity in raw_entities or []:
-        if isinstance(entity, dict):
-            label = str(entity.get("entity_group") or entity.get("label") or entity.get("type") or "ID")
-            value = str(entity.get("word") or entity.get("text") or entity.get("value") or "")
-            score = float(entity.get("confidence") or entity.get("score") or 0.8)
-        else:  # objets typés côté openmed
-            label = str(
-                getattr(entity, "label", None)
-                or getattr(entity, "entity_group", None)
-                or getattr(entity, "type", None)
-                or "ID"
+        label, value, score, start, end = _entity_fields(entity)
+        key = _normalise_label(label)
+
+        # Label volontairement non utilisé dans notre politique cardio.
+        if key in IGNORED_LABELS:
+            continue
+
+        pii_type = LABEL_MAP.get(key)
+        if pii_type is None:
+            # IMPORTANT : plus de fallback vers ID pour un label inconnu.
+            continue
+
+        context = _context_for(text, value, start, end)
+        if not _accept_entity(pii_type, value, context):
+            continue
+
+        findings.append(
+            Finding(
+                type=pii_type,
+                value=value,
+                confidence=round(score, 3),
+                source="openmed",
             )
-            value = str(
-                getattr(entity, "text", None)
-                or getattr(entity, "word", None)
-                or getattr(entity, "value", None)
-                or ""
-            )
-            score = float(
-                getattr(entity, "confidence", None) or getattr(entity, "score", None) or 0.8
-            )
-        key = label.upper().replace("B-", "").replace("I-", "").replace(" ", "_")
-        # Un label inconnu n'est JAMAIS ignoré : il est rédigé de façon conservatrice.
-        pii_type = LABEL_MAP.get(key, "ID")
-        value = value.strip()
-        if value:
-            findings.append(Finding(type=pii_type, value=value, confidence=round(score, 3), source="openmed"))
+        )
     return findings
 
 
 def detect_pii(text: str) -> list[Finding]:
-    """Détection PII par modèle local. Lève OpenMedUnavailable si absent."""
+    """Détection PII par modèle local, puis filtre anti-sur-masquage clinique."""
     openmed = get_engine()
 
-    # API officielle OpenMed 2.0.
     if hasattr(openmed, "extract_pii"):
         result = openmed.extract_pii(  # type: ignore[attr-defined]
             text,
@@ -237,6 +388,6 @@ def detect_pii(text: str) -> list[Finding]:
             entities = getattr(result, "entities", None)
         if entities is None:
             raise OpenMedUnavailable("réponse OpenMed inattendue : `entities` absent")
-        return _normalise_entities(entities)
+        return _normalise_entities(entities, text)
 
     raise OpenMedUnavailable("API openmed inattendue : `extract_pii` introuvable")
